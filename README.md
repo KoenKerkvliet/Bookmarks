@@ -4,13 +4,13 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 
 **Functies**
 
-- Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's herschikken in de zijbalk
+- Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's als tabs in een header bovenin, te herschikken door te slepen
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
 - Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube). Ze slepen, hernoemen en verwijderen net als andere cards
 - Vaste pagina **Nieuw**: hier komen links binnen die je via de browserextensie opslaat; met één klik verplaats je ze naar de juiste pagina en card
 - Zoeken door al je links (`/` of `Ctrl+K`), realtime updates vanuit de extensie
-- Zes thema's: **Licht**, **Donker**, **Neon**, **Oceaan**, **Bos** en **Zonsondergang**, of **Automatisch** (volgt je systeem). Kies via Instellingen of het paletje onderin de zijbalk; de keuze geldt per apparaat
+- Zes thema's: **Licht**, **Donker**, **Neon**, **Oceaan**, **Bos** en **Zonsondergang**, of **Automatisch** (volgt je systeem). Kies via Instellingen of het paletje rechtsboven in de header; de keuze geldt per apparaat
 - Op Android delen vanuit een andere app naar Bookmarks (PWA share target) landt ook in **Nieuw**
 
 ## Installatie

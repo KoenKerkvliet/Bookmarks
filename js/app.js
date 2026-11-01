@@ -650,79 +650,97 @@ function setColumns(page, n) {
   persist(api.patchPage(page.id, { columns: n }));
 }
 
-// ---- Weergave: shell en zijbalk ------------------------------------------------------------------------
+// ---- Weergave: shell en header ---------------------------------------------------------------------------
 
 function buildShell() {
   $root.replaceChildren(
-    h(
-      'div',
-      { class: 'shell' },
-      h('aside', { id: 'sidebar', class: 'sidebar' }),
-      h('div', { class: 'backdrop', onclick: closeSidebar }),
-      h('main', { id: 'main', class: 'main' }),
-    ),
+    h('div', { class: 'shell' }, h('header', { id: 'header', class: 'header' }), h('main', { id: 'main', class: 'main' })),
   );
 }
 
-const openSidebar = () => $root.querySelector('.shell')?.classList.add('nav-open');
-const closeSidebar = () => $root.querySelector('.shell')?.classList.remove('nav-open');
-
 function renderAll() {
-  renderSidebar();
+  renderHeader();
   renderMain();
 }
 
-function navItem(page, route, extra) {
+function tabEl(page, route, extra) {
   const active = route.name === 'page' && route.page?.id === page.id;
   return h(
     'a',
-    { class: `nav-item${active ? ' active' : ''}`, href: `#/p/${page.id}`, dataset: { id: page.id }, 'aria-current': active ? 'page' : null },
-    icon(page.is_inbox ? 'inbox' : 'page', 18),
-    h('span', { class: 'nav-label' }, page.title),
+    { class: `tab${active ? ' active' : ''}`, href: `#/p/${page.id}`, dataset: { id: page.id }, 'aria-current': active ? 'page' : null },
+    icon(page.is_inbox ? 'inbox' : 'page', 16),
+    h('span', { class: 'tab-label' }, page.title),
     extra,
   );
 }
 
-function renderSidebar() {
-  const el = document.getElementById('sidebar');
+function renderHeader() {
+  const el = document.getElementById('header');
   if (!el) return;
   navSortable?.destroy();
+  const previousScroll = el.querySelector('.tabs-scroll')?.scrollLeft ?? 0;
   const route = currentRoute();
   const inbox = inboxPage();
   const count = inboxLinks().length;
   const pages = userPages();
 
-  const list = h('nav', { class: 'nav-pages', 'aria-label': "Pagina's" }, pages.map((p) => navItem(p, route)));
+  const list = h('nav', { class: 'tabs-list', 'aria-label': "Pagina's" }, pages.map((p) => tabEl(p, route)));
+  const scroller = h(
+    'div',
+    { class: 'tabs-scroll' },
+    inbox ? tabEl(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
+    inbox && pages.length ? h('span', { class: 'tab-sep', 'aria-hidden': 'true' }) : null,
+    list,
+    pages.length ? null : h('span', { class: 'tabs-hint' }, "Maak je eerste pagina met de +"),
+  );
 
   el.replaceChildren(
-    ...[
+    h('a', { class: 'brand', href: '#/', title: 'Bookmarks' }, h('span', { class: 'brand-mark' }, icon('bookmark', 18)), h('span', { class: 'brand-name' }, 'Bookmarks')),
+    h('div', { class: 'tabs' }, scroller, iconButton('plus', 'Nieuwe pagina', addPage, 'add-tab')),
     h(
       'div',
-      { class: 'brand' },
-      h('span', { class: 'brand-mark' }, icon('bookmark', 18)),
-      h('span', { class: 'brand-name' }, 'Bookmarks'),
-      iconButton('x', 'Menu sluiten', closeSidebar, 'only-mobile'),
-    ),
-    h('button', { class: 'search-btn', type: 'button', onclick: openSearch }, icon('search', 16), h('span', {}, 'Zoeken'), h('kbd', {}, '/')),
-    inbox ? navItem(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
-    h('div', { class: 'nav-heading' }, h('span', {}, "Pagina's"), iconButton('plus', 'Nieuwe pagina', addPage, 'small')),
-    list,
-    pages.length ? null : h('p', { class: 'nav-empty' }, "Nog geen pagina's. Maak er een met de + hierboven."),
-    h('div', { class: 'spacer' }),
-    h(
-      'div',
-      { class: 'sidebar-foot' },
-      h('a', { class: `nav-item${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen' }, icon('settings', 18), h('span', { class: 'nav-label' }, 'Instellingen')),
+      { class: 'header-actions' },
+      h('button', { class: 'search-btn', type: 'button', 'aria-label': 'Zoeken', title: 'Zoeken (/)', onclick: openSearch }, icon('search', 16), h('span', { class: 'search-text' }, 'Zoeken'), h('kbd', {}, '/')),
       iconButton('palette', 'Thema kiezen', (e) => themeMenu(e.currentTarget)),
+      h('a', { class: `icon-btn${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen', 'aria-label': 'Instellingen', title: 'Instellingen', 'aria-current': route.name === 'settings' ? 'page' : null }, icon('settings')),
     ),
-    ].filter(Boolean),
   );
+
+  // Horizontaal scrollen met het muiswiel, en een fade aan de rand als er meer tabs zijn.
+  const updateFade = () => {
+    const more = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2;
+    const before = scroller.scrollLeft > 2;
+    scroller.classList.toggle('fade-end', more);
+    scroller.classList.toggle('fade-start', before);
+  };
+  scroller.addEventListener('scroll', updateFade, { passive: true });
+  scroller.addEventListener(
+    'wheel',
+    (e) => {
+      if (scroller.scrollWidth <= scroller.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      scroller.scrollLeft += e.deltaY;
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+  scroller.scrollLeft = previousScroll;
+  requestAnimationFrame(() => {
+    const active = scroller.querySelector('.tab.active');
+    if (active) {
+      const a = active.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      if (a.left < s.left + 8) scroller.scrollLeft -= s.left + 40 - a.left;
+      else if (a.right > s.right - 8) scroller.scrollLeft += a.right - s.right + 40;
+    }
+    updateFade();
+  });
 
   if (pages.length > 1) {
     navSortable = Sortable.create(list, {
       animation: 150,
       delay: 200,
       delayOnTouchOnly: true,
+      direction: 'horizontal',
       ghostClass: 'drag-ghost',
       onEnd: () => {
         const changes = [];
@@ -778,7 +796,7 @@ function topbar({ title, page, controls }) {
             return;
           }
           page.title = v;
-          renderSidebar();
+          renderHeader();
           persist(api.patchPage(page.id, { title: v }));
         },
         onkeydown: (e) => {
@@ -790,7 +808,7 @@ function topbar({ title, page, controls }) {
         },
       })
     : h('h1', { class: 'page-title static' }, title);
-  return h('header', { class: 'topbar' }, iconButton('menu', 'Menu', openSidebar, 'only-mobile'), titleEl, h('div', { class: 'spacer' }), controls);
+  return h('header', { class: 'topbar' }, titleEl, h('div', { class: 'spacer' }), controls);
 }
 
 function boardView(page) {
@@ -1325,7 +1343,7 @@ async function handleShareTarget() {
 function onRemoteBookmark(row) {
   if (state.bookmarks.some((b) => b.id === row.id)) return;
   state.bookmarks.push(row);
-  renderSidebar();
+  renderHeader();
   const route = currentRoute();
   if (route.name === 'page' && route.page?.is_inbox && !document.querySelector('dialog[open]')) renderMain();
   toast(`Nieuw in inbox: ${row.title}`);
@@ -1368,7 +1386,6 @@ function isTyping() {
 
 addEventListener('hashchange', () => {
   if (!state.loaded) return;
-  closeSidebar();
   renderAll();
 });
 
