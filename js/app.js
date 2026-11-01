@@ -442,6 +442,37 @@ async function configureCard(card) {
   persist(api.patchCard(card.id, { config: card.config, title: card.title }));
 }
 
+async function moveCard(card) {
+  const targets = userPages().filter((p) => p.id !== card.page_id);
+  if (!targets.length) {
+    toast('Er is geen andere pagina om naartoe te verplaatsen. Maak er eerst een aan.');
+    return;
+  }
+  const r = await openDialog(
+    'Card verplaatsen',
+    fieldsBody(
+      [{ name: 'pageId', label: 'Naar pagina', type: 'select', options: targets.map((p) => ({ value: p.id, label: p.title })) }],
+      `“${card.title}” wordt verplaatst, met alles wat erin staat.`,
+    ),
+    { submit: 'Verplaatsen' },
+  );
+  if (!r) return;
+  const page = pageById(r.pageId);
+  const column_index = leastFilledColumn(page);
+  const position = pageCards(page.id).filter((c) => Math.min(c.column_index, page.columns - 1) === column_index).length;
+  const before = { page_id: card.page_id, column_index: card.column_index, position: card.position };
+  Object.assign(card, { page_id: page.id, column_index, position });
+  renderMain();
+  toast(`Verplaatst naar ${page.title}`, { action: { label: 'Openen', onClick: () => go(`#/p/${page.id}`) } });
+  try {
+    await api.patchCard(card.id, { page_id: page.id, column_index, position });
+  } catch (err) {
+    Object.assign(card, before);
+    renderMain();
+    toast(`Verplaatsen mislukt: ${err.message}`, { error: true });
+  }
+}
+
 const saveTimers = new Map();
 function saveCardConfig(card, delay = 400) {
   clearTimeout(saveTimers.get(card.id));
@@ -494,6 +525,7 @@ function cardMenu(card, anchor) {
     showMenu(anchor, [
       def?.configure ? { label: 'Instellingen…', icon: 'settings', onClick: () => configureCard(card) } : null,
       { label: 'Naam wijzigen', icon: 'pencil', onClick: () => renameCard(card) },
+      { label: 'Verplaatsen naar pagina…', icon: 'move', onClick: () => moveCard(card) },
       '-',
       { label: 'Card verwijderen', icon: 'trash', danger: true, onClick: () => deleteCard(card) },
     ].filter(Boolean));
@@ -505,6 +537,8 @@ function cardMenu(card, anchor) {
     ...VIEWS.map((v) => ({ label: v.label, checked: card.view === v.value, onClick: () => setCardView(card, v.value) })),
     '-',
     { label: 'Naam wijzigen', icon: 'pencil', onClick: () => renameCard(card) },
+    { label: 'Verplaatsen naar pagina…', icon: 'move', onClick: () => moveCard(card) },
+    '-',
     { label: 'Card verwijderen', icon: 'trash', danger: true, onClick: () => deleteCard(card) },
   ]);
 }
