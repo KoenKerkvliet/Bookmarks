@@ -1,0 +1,1144 @@
+import * as api from './api.js';
+import { h, icon, showMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
+
+const VIEWS = [
+  { value: 'list', label: 'Lijst' },
+  { value: 'icons-s', label: 'Iconen S' },
+  { value: 'icons-m', label: 'Iconen M' },
+  { value: 'icons-l', label: 'Iconen L' },
+];
+const MAX_COLUMNS = 6;
+
+const state = { pages: [], cards: [], bookmarks: [], settings: null, email: '', loaded: false };
+const $root = document.getElementById('app');
+
+let sortables = [];
+let navSortable = null;
+let unsubscribe = null;
+let lastLoad = 0;
+
+// ---- Voorkeuren (alleen op dit apparaat) --------------------------------------
+
+const prefs = {
+  get(key, fallback = '') {
+    try {
+      return localStorage.getItem(key) ?? fallback;
+    } catch {
+      return fallback;
+    }
+  },
+  set(key, value) {
+    try {
+      if (value) localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    } catch {
+      /* opslag niet beschikbaar */
+    }
+  },
+};
+
+function applyTheme() {
+  const t = prefs.get('theme');
+  if (t) document.documentElement.dataset.theme = t;
+  else delete document.documentElement.dataset.theme;
+}
+
+const linkTarget = () => (prefs.get('openIn', 'blank') === 'self' ? '_self' : '_blank');
+
+// ---- Data-helpers --------------------------------------------------------------
+
+const byPos = (a, b) => a.position - b.position;
+const inboxPage = () => state.pages.find((p) => p.is_inbox);
+const userPages = () => state.pages.filter((p) => !p.is_inbox).sort(byPos);
+const pageById = (id) => state.pages.find((p) => p.id === id);
+const cardById = (id) => state.cards.find((c) => c.id === id);
+const pageCards = (pageId) => state.cards.filter((c) => c.page_id === pageId);
+const cardLinks = (cardId) => state.bookmarks.filter((b) => b.card_id === cardId).sort(byPos);
+const inboxLinks = () =>
+  state.bookmarks.filter((b) => !b.card_id).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+function hostOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
+
+function normalizeUrl(value) {
+  let v = value.trim();
+  if (!v) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = `https://${v}`;
+  try {
+    const u = new URL(v);
+    return /^https?:$/.test(u.protocol) ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
+const safeHref = (url) => (/^https?:\/\//i.test(url) ? url : '#');
+
+const rtf = new Intl.RelativeTimeFormat('nl', { numeric: 'auto' });
+function timeAgo(iso) {
+  const s = (Date.parse(iso) - Date.now()) / 1000;
+  const abs = Math.abs(s);
+  if (abs < 60) return 'zojuist';
+  if (abs < 3600) return rtf.format(Math.round(s / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(s / 3600), 'hour');
+  if (abs < 2592000) return rtf.format(Math.round(s / 86400), 'day');
+  return new Date(iso).toLocaleDateString('nl-NL');
+}
+
+function leastFilledColumn(page) {
+  const counts = Array(page.columns).fill(0);
+  pageCards(page.id).forEach((c) => counts[Math.min(c.column_index, page.columns - 1)]++);
+  return counts.indexOf(Math.min(...counts));
+}
+
+function persist(promise, message = 'Opslaan mislukt') {
+  return promise.catch((err) => {
+    console.error(err);
+    toast(`${message}: ${err.message || err}`, { error: true });
+    reload();
+  });
+}
+
+async function reload() {
+  try {
+    Object.assign(state, await api.loadAll());
+    lastLoad = Date.now();
+    renderAll();
+  } catch (err) {
+    console.error(err);
+  }
+}
+
+// ---- Routing -----------------------------------------------------------------------
+
+function currentRoute() {
+  const hash = location.hash.replace(/^#\/?/, '');
+  if (hash === 'instellingen') return { name: 'settings' };
+  const m = hash.match(/^p\/([\w-]+)/);
+  let page = m && pageById(m[1]);
+  if (!page) page = pageById(prefs.get('lastPage')) || userPages()[0] || inboxPage();
+  return { name: 'page', page };
+}
+
+const go = (hash) => {
+  location.hash = hash;
+};
+
+// ---- Favicons en links ------------------------------------------------------------------
+
+function faviconEl(url) {
+  const host = hostOf(url);
+  const img = h('img', {
+    class: 'fav',
+    alt: '',
+    loading: 'lazy',
+    draggable: 'false',
+    src: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`,
+  });
+  img.addEventListener('error', () => img.replaceWith(letterTile(host)));
+  return img;
+}
+
+function letterTile(host) {
+  let hash = 0;
+  for (const ch of host) hash = (hash * 31 + ch.charCodeAt(0)) % 360;
+  return h('span', { class: 'fav fav-letter', style: { '--hue': hash } }, (host[0] || '?').toUpperCase());
+}
+
+function iconButton(name, label, onclick, cls = '') {
+  return h('button', { class: `icon-btn ${cls}`, type: 'button', 'aria-label': label, title: label, onclick }, icon(name));
+}
+
+function linkEl(b) {
+  const el = h(
+    'div',
+    { class: 'link', dataset: { id: b.id } },
+    h(
+      'a',
+      {
+        class: 'link-a',
+        href: safeHref(b.url),
+        target: linkTarget(),
+        rel: 'noopener noreferrer',
+        draggable: 'false',
+        title: `${b.title}\n${b.url}`,
+      },
+      faviconEl(b.url),
+      h('span', { class: 'link-title' }, b.title),
+    ),
+    h(
+      'button',
+      {
+        class: 'icon-btn link-menu',
+        type: 'button',
+        'aria-label': `Opties voor ${b.title}`,
+        onclick: (e) => linkMenu(b, e.currentTarget),
+      },
+      icon('dots', 16),
+    ),
+  );
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    linkMenu(b, { x: e.clientX, y: e.clientY });
+  });
+  return el;
+}
+
+function linkMenu(b, anchor) {
+  showMenu(anchor, [
+    { label: 'Bewerken', icon: 'pencil', onClick: () => editLink(b) },
+    { label: 'Verplaatsen…', icon: 'move', onClick: () => moveLink(b) },
+    { label: 'Adres kopiëren', icon: 'copy', onClick: () => copyText(b.url, 'Adres gekopieerd') },
+    '-',
+    { label: 'Verwijderen', icon: 'trash', danger: true, onClick: () => deleteLink(b) },
+  ]);
+}
+
+async function copyText(text, message = 'Gekopieerd') {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast(message);
+  } catch {
+    toast('Kopiëren is niet gelukt.', { error: true });
+  }
+}
+
+// ---- Acties: links -------------------------------------------------------------------------
+
+const urlFields = (url = '', title = '') => [
+  {
+    name: 'url',
+    label: 'Adres',
+    value: url,
+    required: true,
+    placeholder: 'https://voorbeeld.nl',
+    inputmode: 'url',
+    validate: (v) => (normalizeUrl(v) ? null : 'Dit is geen geldig webadres.'),
+  },
+  { name: 'title', label: 'Naam', value: title, placeholder: 'Optioneel — anders de domeinnaam', maxlength: 300 },
+];
+
+async function addLink(card) {
+  const r = await openDialog('Link toevoegen', fieldsBody(urlFields()), { submit: 'Toevoegen' });
+  if (!r) return;
+  const url = normalizeUrl(r.url);
+  const position = cardLinks(card.id).length;
+  try {
+    const row = await api.insertBookmark({ card_id: card.id, url, title: r.title || hostOf(url), position });
+    state.bookmarks.push(row);
+    renderMain();
+  } catch (err) {
+    toast(`Toevoegen mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function editLink(b) {
+  const r = await openDialog('Link bewerken', fieldsBody(urlFields(b.url, b.title)));
+  if (!r) return;
+  const url = normalizeUrl(r.url);
+  Object.assign(b, { url, title: r.title || hostOf(url) });
+  renderMain();
+  persist(api.patchBookmark(b.id, { url: b.url, title: b.title }));
+}
+
+async function deleteLink(b) {
+  state.bookmarks = state.bookmarks.filter((x) => x !== b);
+  renderAll();
+  try {
+    await api.removeBookmark(b.id);
+  } catch (err) {
+    state.bookmarks.push(b);
+    renderAll();
+    toast(`Verwijderen mislukt: ${err.message}`, { error: true });
+    return;
+  }
+  toast('Link verwijderd', {
+    action: {
+      label: 'Ongedaan maken',
+      onClick: async () => {
+        try {
+          const row = await api.insertBookmark({
+            id: b.id,
+            card_id: b.card_id,
+            url: b.url,
+            title: b.title,
+            position: b.position,
+            created_at: b.created_at,
+          });
+          state.bookmarks.push(row);
+          renderAll();
+        } catch (err) {
+          toast(`Terugzetten mislukt: ${err.message}`, { error: true });
+        }
+      },
+    },
+  });
+}
+
+async function moveLink(b) {
+  const pages = userPages();
+  if (!pages.length) {
+    toast('Maak eerst een pagina aan om naartoe te verplaatsen.');
+    return;
+  }
+  let last = {};
+  try {
+    last = JSON.parse(prefs.get('lastMove', '{}'));
+  } catch {
+    /* negeren */
+  }
+  const current = b.card_id && pageById(cardById(b.card_id)?.page_id);
+  const startPage = pages.find((p) => p.id === (current?.id ?? last.pageId)) ?? pages[0];
+
+  const body = () => {
+    const pageSel = h('select', { class: 'input' }, pages.map((p) => h('option', { value: p.id, selected: p.id === startPage.id }, p.title)));
+    const cardSel = h('select', { class: 'input' });
+    const newTitle = h('input', { class: 'input', type: 'text', placeholder: 'Naam van de nieuwe card', maxlength: 100 });
+    const newRow = h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Naam nieuwe card'), newTitle, h('div', { class: 'field-error' }));
+
+    const fill = (preferred) => {
+      const cards = pageCards(pageSel.value).sort((a, c) => a.column_index - c.column_index || a.position - c.position);
+      cardSel.replaceChildren(
+        ...cards.map((c) => h('option', { value: c.id, selected: c.id === preferred }, c.title)),
+        h('option', { value: '__new', selected: !cards.length }, '＋ Nieuwe card…'),
+      );
+      newRow.hidden = cardSel.value !== '__new';
+    };
+    pageSel.addEventListener('change', () => fill());
+    cardSel.addEventListener('change', () => {
+      newRow.hidden = cardSel.value !== '__new';
+      if (!newRow.hidden) newTitle.focus();
+    });
+    fill(b.card_id ?? last.cardId);
+
+    return {
+      el: h(
+        'div',
+        { class: 'fields' },
+        h('p', { class: 'dialog-text' }, b.title),
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Pagina'), pageSel),
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Card'), cardSel),
+        newRow,
+      ),
+      focus: () => cardSel,
+      collect() {
+        const isNew = cardSel.value === '__new';
+        if (isNew && !newTitle.value.trim()) {
+          newRow.querySelector('.field-error').textContent = 'Geef de nieuwe card een naam.';
+          return undefined;
+        }
+        return { pageId: pageSel.value, cardId: isNew ? null : cardSel.value, newTitle: newTitle.value.trim() };
+      },
+    };
+  };
+
+  const r = await openDialog('Verplaatsen naar…', body, { submit: 'Verplaatsen' });
+  if (!r) return;
+  const page = pageById(r.pageId);
+  try {
+    let card = r.cardId && cardById(r.cardId);
+    if (!card) {
+      card = await api.insertCard({
+        page_id: page.id,
+        title: r.newTitle,
+        view: 'list',
+        column_index: leastFilledColumn(page),
+        position: pageCards(page.id).length,
+      });
+      state.cards.push(card);
+    }
+    const position = cardLinks(card.id).length;
+    await api.patchBookmark(b.id, { card_id: card.id, position });
+    Object.assign(b, { card_id: card.id, position });
+    prefs.set('lastMove', JSON.stringify({ pageId: page.id, cardId: card.id }));
+    renderAll();
+    toast(`Verplaatst naar ${page.title} › ${card.title}`, { action: { label: 'Openen', onClick: () => go(`#/p/${page.id}`) } });
+  } catch (err) {
+    toast(`Verplaatsen mislukt: ${err.message}`, { error: true });
+    reload();
+  }
+}
+
+// ---- Acties: cards ----------------------------------------------------------------------------
+
+async function addCard(page) {
+  const r = await openDialog(
+    'Nieuwe card',
+    fieldsBody([
+      { name: 'title', label: 'Titel', required: true, maxlength: 100 },
+      { name: 'view', label: 'Weergave', type: 'segmented', options: VIEWS, value: 'list' },
+    ]),
+    { submit: 'Aanmaken' },
+  );
+  if (!r) return;
+  const col = leastFilledColumn(page);
+  const position = pageCards(page.id).filter((c) => Math.min(c.column_index, page.columns - 1) === col).length;
+  try {
+    const row = await api.insertCard({ page_id: page.id, title: r.title, view: r.view, column_index: col, position });
+    state.cards.push(row);
+    renderMain();
+  } catch (err) {
+    toast(`Aanmaken mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function renameCard(card) {
+  const r = await openDialog('Naam wijzigen', fieldsBody([{ name: 'title', label: 'Titel', value: card.title, required: true, maxlength: 100 }]));
+  if (!r) return;
+  card.title = r.title;
+  renderMain();
+  persist(api.patchCard(card.id, { title: card.title }));
+}
+
+function setCardView(card, view) {
+  if (card.view === view) return;
+  card.view = view;
+  renderMain();
+  persist(api.patchCard(card.id, { view }));
+}
+
+async function deleteCard(card) {
+  const n = cardLinks(card.id).length;
+  const ok = await confirmDialog({
+    title: 'Card verwijderen?',
+    message: n
+      ? `“${card.title}” en de ${n} snelkoppeling${n === 1 ? '' : 'en'} erin worden verwijderd.`
+      : `“${card.title}” wordt verwijderd.`,
+  });
+  if (!ok) return;
+  try {
+    await api.removeCard(card.id);
+    state.cards = state.cards.filter((c) => c !== card);
+    state.bookmarks = state.bookmarks.filter((b) => b.card_id !== card.id);
+    renderAll();
+  } catch (err) {
+    toast(`Verwijderen mislukt: ${err.message}`, { error: true });
+  }
+}
+
+function cardMenu(card, anchor) {
+  showMenu(anchor, [
+    { label: 'Link toevoegen', icon: 'plus', onClick: () => addLink(card) },
+    '-',
+    ...VIEWS.map((v) => ({ label: v.label, checked: card.view === v.value, onClick: () => setCardView(card, v.value) })),
+    '-',
+    { label: 'Naam wijzigen', icon: 'pencil', onClick: () => renameCard(card) },
+    { label: 'Card verwijderen', icon: 'trash', danger: true, onClick: () => deleteCard(card) },
+  ]);
+}
+
+// ---- Acties: pagina's ------------------------------------------------------------------------------
+
+async function addPage() {
+  const r = await openDialog('Nieuwe pagina', fieldsBody([{ name: 'title', label: 'Titel', required: true, maxlength: 60 }]), { submit: 'Aanmaken' });
+  if (!r) return;
+  try {
+    const position = Math.max(-1, ...userPages().map((p) => p.position)) + 1;
+    const row = await api.insertPage({ title: r.title, columns: 3, position });
+    state.pages.push(row);
+    go(`#/p/${row.id}`);
+    renderAll();
+  } catch (err) {
+    toast(`Aanmaken mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function deletePage(page) {
+  const cards = pageCards(page.id);
+  const n = cards.reduce((sum, c) => sum + cardLinks(c.id).length, 0);
+  const ok = await confirmDialog({
+    title: 'Pagina verwijderen?',
+    message: cards.length
+      ? `“${page.title}” met ${cards.length} card${cards.length === 1 ? '' : 's'} en ${n} snelkoppeling${n === 1 ? '' : 'en'} wordt verwijderd.`
+      : `“${page.title}” wordt verwijderd.`,
+  });
+  if (!ok) return;
+  try {
+    await api.removePage(page.id);
+    const ids = new Set(cards.map((c) => c.id));
+    state.pages = state.pages.filter((p) => p !== page);
+    state.cards = state.cards.filter((c) => c.page_id !== page.id);
+    state.bookmarks = state.bookmarks.filter((b) => !ids.has(b.card_id));
+    prefs.set('lastPage', '');
+    go('#/');
+    renderAll();
+  } catch (err) {
+    toast(`Verwijderen mislukt: ${err.message}`, { error: true });
+  }
+}
+
+function setColumns(page, n) {
+  n = Math.min(MAX_COLUMNS, Math.max(1, n));
+  if (n === page.columns) return;
+  page.columns = n;
+  renderMain();
+  persist(api.patchPage(page.id, { columns: n }));
+}
+
+// ---- Weergave: shell en zijbalk ------------------------------------------------------------------------
+
+function buildShell() {
+  $root.replaceChildren(
+    h(
+      'div',
+      { class: 'shell' },
+      h('aside', { id: 'sidebar', class: 'sidebar' }),
+      h('div', { class: 'backdrop', onclick: closeSidebar }),
+      h('main', { id: 'main', class: 'main' }),
+    ),
+  );
+}
+
+const openSidebar = () => $root.querySelector('.shell')?.classList.add('nav-open');
+const closeSidebar = () => $root.querySelector('.shell')?.classList.remove('nav-open');
+
+function renderAll() {
+  renderSidebar();
+  renderMain();
+}
+
+function navItem(page, route, extra) {
+  const active = route.name === 'page' && route.page?.id === page.id;
+  return h(
+    'a',
+    { class: `nav-item${active ? ' active' : ''}`, href: `#/p/${page.id}`, dataset: { id: page.id }, 'aria-current': active ? 'page' : null },
+    icon(page.is_inbox ? 'inbox' : 'page', 18),
+    h('span', { class: 'nav-label' }, page.title),
+    extra,
+  );
+}
+
+function renderSidebar() {
+  const el = document.getElementById('sidebar');
+  if (!el) return;
+  navSortable?.destroy();
+  const route = currentRoute();
+  const inbox = inboxPage();
+  const count = inboxLinks().length;
+  const pages = userPages();
+  const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+
+  const list = h('nav', { class: 'nav-pages', 'aria-label': "Pagina's" }, pages.map((p) => navItem(p, route)));
+
+  el.replaceChildren(
+    ...[
+    h(
+      'div',
+      { class: 'brand' },
+      h('span', { class: 'brand-mark' }, icon('bookmark', 18)),
+      h('span', { class: 'brand-name' }, 'Bookmarks'),
+      iconButton('x', 'Menu sluiten', closeSidebar, 'only-mobile'),
+    ),
+    h('button', { class: 'search-btn', type: 'button', onclick: openSearch }, icon('search', 16), h('span', {}, 'Zoeken'), h('kbd', {}, '/')),
+    inbox ? navItem(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
+    h('div', { class: 'nav-heading' }, h('span', {}, "Pagina's"), iconButton('plus', 'Nieuwe pagina', addPage, 'small')),
+    list,
+    pages.length ? null : h('p', { class: 'nav-empty' }, "Nog geen pagina's. Maak er een met de + hierboven."),
+    h('div', { class: 'spacer' }),
+    h(
+      'div',
+      { class: 'sidebar-foot' },
+      h('a', { class: `nav-item${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen' }, icon('settings', 18), h('span', { class: 'nav-label' }, 'Instellingen')),
+      iconButton(dark ? 'sun' : 'moon', dark ? 'Lichte weergave' : 'Donkere weergave', () => {
+        prefs.set('theme', dark ? 'light' : 'dark');
+        applyTheme();
+        renderSidebar();
+      }),
+    ),
+    ].filter(Boolean),
+  );
+
+  if (pages.length > 1) {
+    navSortable = Sortable.create(list, {
+      animation: 150,
+      delay: 200,
+      delayOnTouchOnly: true,
+      ghostClass: 'drag-ghost',
+      onEnd: () => {
+        const changes = [];
+        [...list.children].forEach((node, i) => {
+          const p = pageById(node.dataset.id);
+          if (p && p.position !== i) {
+            p.position = i;
+            changes.push({ id: p.id, position: i });
+          }
+        });
+        if (changes.length) persist(api.patchMany('pages', changes));
+      },
+    });
+  }
+}
+
+// ---- Weergave: hoofdgebied ----------------------------------------------------------------------------------
+
+function destroySortables() {
+  sortables.forEach((s) => s.destroy());
+  sortables = [];
+}
+
+function renderMain() {
+  const main = document.getElementById('main');
+  if (!main) return;
+  destroySortables();
+  const route = currentRoute();
+  let view;
+  if (route.name === 'settings') view = settingsView();
+  else if (route.page?.is_inbox) view = inboxView(route.page);
+  else if (route.page) view = boardView(route.page);
+  else view = h('div', { class: 'empty' }, 'Geen pagina gevonden.');
+  if (route.page) prefs.set('lastPage', route.page.id);
+  main.replaceChildren(view);
+  document.title = route.name === 'settings' ? 'Instellingen · Bookmarks' : `${route.page?.title ?? 'Bookmarks'} · Bookmarks`;
+}
+
+function topbar({ title, page, controls }) {
+  const titleEl = page
+    ? h('input', {
+        class: 'page-title',
+        value: page.title,
+        maxlength: 60,
+        'aria-label': 'Paginatitel',
+        onchange: (e) => {
+          const v = e.target.value.trim();
+          if (!v) {
+            e.target.value = page.title;
+            return;
+          }
+          page.title = v;
+          renderSidebar();
+          persist(api.patchPage(page.id, { title: v }));
+        },
+        onkeydown: (e) => {
+          if (e.key === 'Enter') e.target.blur();
+          if (e.key === 'Escape') {
+            e.target.value = page.title;
+            e.target.blur();
+          }
+        },
+      })
+    : h('h1', { class: 'page-title static' }, title);
+  return h('header', { class: 'topbar' }, iconButton('menu', 'Menu', openSidebar, 'only-mobile'), titleEl, h('div', { class: 'spacer' }), controls);
+}
+
+function boardView(page) {
+  const controls = [
+    h(
+      'div',
+      { class: 'stepper', role: 'group', 'aria-label': 'Aantal kolommen' },
+      h('span', { class: 'stepper-label' }, 'Kolommen'),
+      h('button', { class: 'icon-btn small', type: 'button', 'aria-label': 'Minder kolommen', disabled: page.columns <= 1, onclick: () => setColumns(page, page.columns - 1) }, icon('minus', 14)),
+      h('span', { class: 'stepper-value', 'aria-live': 'polite' }, page.columns),
+      h('button', { class: 'icon-btn small', type: 'button', 'aria-label': 'Meer kolommen', disabled: page.columns >= MAX_COLUMNS, onclick: () => setColumns(page, page.columns + 1) }, icon('plus', 14)),
+    ),
+    h('button', { class: 'btn primary', type: 'button', onclick: () => addCard(page) }, icon('plus', 16), h('span', {}, 'Card')),
+    iconButton('dots', 'Paginaopties', (e) =>
+      showMenu(e.currentTarget, [
+        { label: 'Titel wijzigen', icon: 'pencil', onClick: () => document.querySelector('.page-title')?.focus() },
+        { label: 'Pagina verwijderen', icon: 'trash', danger: true, onClick: () => deletePage(page) },
+      ]),
+    ),
+  ];
+
+  const cards = pageCards(page.id);
+  const wrap = h('div', { class: 'view' }, topbar({ page, controls }));
+  if (!cards.length) {
+    wrap.append(
+      h(
+        'div',
+        { class: 'empty' },
+        h('div', { class: 'empty-art' }, icon('page', 36)),
+        h('h2', {}, 'Nog geen cards op deze pagina'),
+        h('p', {}, 'Een card is een groepje snelkoppelingen onder één titel.'),
+        h('button', { class: 'btn primary', type: 'button', onclick: () => addCard(page) }, icon('plus', 16), h('span', {}, 'Eerste card maken')),
+      ),
+    );
+    return wrap;
+  }
+
+  const board = h('div', { class: 'board', dataset: { cols: page.columns }, style: { '--cols': page.columns } });
+  for (let i = 0; i < page.columns; i++) {
+    const colCards = cards
+      .filter((c) => Math.min(c.column_index, page.columns - 1) === i)
+      .sort(byPos);
+    board.append(h('div', { class: 'column', dataset: { col: i } }, colCards.map(cardEl)));
+  }
+  wrap.append(board);
+  initBoardSortables(board, page);
+  return wrap;
+}
+
+function cardEl(card) {
+  return h(
+    'article',
+    { class: 'card', dataset: { id: card.id } },
+    h(
+      'header',
+      { class: 'card-head' },
+      h('h2', { class: 'card-title', title: card.title }, card.title),
+      iconButton('plus', 'Link toevoegen', () => addLink(card), 'small'),
+      iconButton('dots', 'Card-opties', (e) => cardMenu(card, e.currentTarget), 'small'),
+    ),
+    h('div', { class: `links view-${card.view}`, dataset: { card: card.id } }, cardLinks(card.id).map(linkEl)),
+  );
+}
+
+function initBoardSortables(board, page) {
+  const common = { animation: 150, delay: 150, delayOnTouchOnly: true, touchStartThreshold: 6, ghostClass: 'drag-ghost', chosenClass: 'drag-chosen' };
+  const setDragging = (on) => document.body.classList.toggle('dragging', on);
+
+  board.querySelectorAll('.column').forEach((col) =>
+    sortables.push(
+      Sortable.create(col, {
+        ...common,
+        group: 'cards',
+        draggable: '.card',
+        handle: '.card-head',
+        filter: '.icon-btn',
+        preventOnFilter: false,
+        onStart: () => setDragging(true),
+        onEnd: () => {
+          setDragging(false);
+          const changes = [];
+          board.querySelectorAll('.column').forEach((colEl, ci) => {
+            [...colEl.children].forEach((node, pos) => {
+              const c = cardById(node.dataset.id);
+              if (c && (c.column_index !== ci || c.position !== pos)) {
+                Object.assign(c, { column_index: ci, position: pos });
+                changes.push({ id: c.id, column_index: ci, position: pos });
+              }
+            });
+          });
+          if (changes.length) persist(api.patchMany('cards', changes));
+        },
+      }),
+    ),
+  );
+
+  board.querySelectorAll('.links').forEach((box) =>
+    sortables.push(
+      Sortable.create(box, {
+        ...common,
+        group: 'links',
+        draggable: '.link',
+        filter: '.link-menu',
+        preventOnFilter: false,
+        onStart: () => setDragging(true),
+        onEnd: () => {
+          setDragging(false);
+          const changes = [];
+          board.querySelectorAll('.links').forEach((boxEl) => {
+            [...boxEl.children].forEach((node, pos) => {
+              const b = state.bookmarks.find((x) => x.id === node.dataset.id);
+              if (b && (b.card_id !== boxEl.dataset.card || b.position !== pos)) {
+                Object.assign(b, { card_id: boxEl.dataset.card, position: pos });
+                changes.push({ id: b.id, card_id: b.card_id, position: pos });
+              }
+            });
+          });
+          if (changes.length) persist(api.patchMany('bookmarks', changes));
+        },
+      }),
+    ),
+  );
+}
+
+function inboxView(page) {
+  const links = inboxLinks();
+  const wrap = h('div', { class: 'view' }, topbar({ title: page.title, controls: null }));
+  const body = h('div', { class: 'inbox' });
+  body.append(h('p', { class: 'inbox-intro' }, 'Snelkoppelingen die je via de browserextensie opslaat komen hier binnen. Verplaats ze naar de juiste pagina en card.'));
+
+  if (!links.length) {
+    body.append(
+      h(
+        'div',
+        { class: 'empty' },
+        h('div', { class: 'empty-art' }, icon('inbox', 36)),
+        h('h2', {}, 'Je inbox is leeg'),
+        h('p', {}, 'Sla een site op met de extensie en hij verschijnt hier direct.'),
+        h('a', { class: 'btn', href: '#/instellingen' }, 'Extensie koppelen'),
+      ),
+    );
+  } else {
+    body.append(
+      h(
+        'ul',
+        { class: 'inbox-list' },
+        links.map((b) =>
+          h(
+            'li',
+            { class: 'inbox-row' },
+            h(
+              'a',
+              { class: 'inbox-link', href: safeHref(b.url), target: linkTarget(), rel: 'noopener noreferrer', title: b.url },
+              faviconEl(b.url),
+              h('span', { class: 'inbox-text' }, h('span', { class: 'inbox-title' }, b.title), h('span', { class: 'inbox-meta' }, `${hostOf(b.url)} · ${timeAgo(b.created_at)}`)),
+            ),
+            h('button', { class: 'btn soft', type: 'button', onclick: () => moveLink(b) }, icon('move', 16), h('span', {}, 'Verplaats')),
+            iconButton('dots', `Opties voor ${b.title}`, (e) => linkMenu(b, e.currentTarget), 'link-menu-always'),
+          ),
+        ),
+      ),
+    );
+  }
+  wrap.append(body);
+  return wrap;
+}
+
+// ---- Instellingen ---------------------------------------------------------------------------------------------
+
+function segmented(options, value, onChange) {
+  const buttons = options.map((o) =>
+    h('button', { type: 'button', role: 'radio', class: 'seg', 'aria-checked': String(o.value === value), onclick: () => {
+      buttons.forEach((b, i) => b.setAttribute('aria-checked', String(options[i].value === o.value)));
+      onChange(o.value);
+    } }, o.label),
+  );
+  return h('div', { class: 'segmented', role: 'radiogroup' }, buttons);
+}
+
+function settingsView() {
+  const key = state.settings?.api_key ?? '';
+  let shown = false;
+  const keyBox = h('code', { class: 'secret' });
+  const paint = () => {
+    keyBox.textContent = shown ? key : `${'•'.repeat(24)}${key.slice(-4)}`;
+  };
+  paint();
+
+  const endpoint = `${api.supabaseUrl}/rest/v1/rpc/add_bookmark`;
+  const example = `POST ${endpoint}
+apikey: ${api.anonKey}
+Content-Type: application/json
+
+{ "p_key": "<jouw API-sleutel>", "p_url": "https://voorbeeld.nl", "p_title": "Titel van de pagina" }`;
+
+  const section = (title, ...kids) => h('section', { class: 'panel' }, h('h2', {}, title), kids);
+
+  return h(
+    'div',
+    { class: 'view' },
+    topbar({ title: 'Instellingen', controls: null }),
+    h(
+      'div',
+      { class: 'settings' },
+      section(
+        'Browserextensie',
+        h('p', { class: 'muted' }, 'De extensie stuurt een snelkoppeling met deze sleutel naar je inbox “Nieuw”. Deel de sleutel met niemand: wie hem heeft, kan links aan je inbox toevoegen.'),
+        h('div', { class: 'row' }, h('span', { class: 'label' }, 'API-sleutel'), keyBox,
+          h('button', { class: 'btn', type: 'button', onclick: () => { shown = !shown; paint(); } }, shown ? 'Verberg' : 'Toon'),
+          h('button', { class: 'btn', type: 'button', onclick: () => copyText(key, 'Sleutel gekopieerd') }, icon('copy', 16), h('span', {}, 'Kopieer')),
+          h('button', { class: 'btn ghost', type: 'button', onclick: regenerateKey }, icon('refresh', 16), h('span', {}, 'Nieuwe sleutel')),
+        ),
+        h('div', { class: 'row' }, h('span', { class: 'label' }, 'Endpoint'), h('code', { class: 'secret' }, endpoint),
+          h('button', { class: 'btn', type: 'button', onclick: () => copyText(endpoint, 'Endpoint gekopieerd') }, icon('copy', 16), h('span', {}, 'Kopieer')),
+        ),
+        h('details', {}, h('summary', {}, 'Voorbeeldverzoek'), h('pre', { class: 'code' }, example),
+          h('button', { class: 'btn', type: 'button', onclick: () => copyText(example.replace('<jouw API-sleutel>', key), 'Voorbeeld gekopieerd') }, icon('copy', 16), h('span', {}, 'Kopieer met sleutel')),
+        ),
+      ),
+      section(
+        'Weergave',
+        h('div', { class: 'row' }, h('span', { class: 'label' }, 'Thema'),
+          segmented([{ value: '', label: 'Automatisch' }, { value: 'light', label: 'Licht' }, { value: 'dark', label: 'Donker' }], prefs.get('theme'), (v) => { prefs.set('theme', v); applyTheme(); renderSidebar(); }),
+        ),
+        h('div', { class: 'row' }, h('span', { class: 'label' }, 'Links openen'),
+          segmented([{ value: 'blank', label: 'Nieuw tabblad' }, { value: 'self', label: 'Zelfde venster' }], prefs.get('openIn', 'blank'), (v) => { prefs.set('openIn', v); }),
+        ),
+      ),
+      section(
+        'Account',
+        h('div', { class: 'row' }, h('span', { class: 'label' }, 'Ingelogd als'), h('span', {}, state.email)),
+        h('div', { class: 'row' }, h('button', { class: 'btn', type: 'button', onclick: logout }, icon('logout', 16), h('span', {}, 'Uitloggen'))),
+      ),
+    ),
+  );
+}
+
+async function regenerateKey() {
+  const ok = await confirmDialog({
+    title: 'Nieuwe API-sleutel genereren?',
+    message: 'De huidige sleutel werkt daarna niet meer. Vergeet niet de nieuwe sleutel in je extensie te zetten.',
+    confirm: 'Genereren',
+    danger: false,
+  });
+  if (!ok) return;
+  try {
+    state.settings = { api_key: await api.regenerateApiKey() };
+    renderMain();
+    toast('Nieuwe sleutel aangemaakt');
+  } catch (err) {
+    toast(`Genereren mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function logout() {
+  await api.signOut();
+}
+
+// ---- Zoeken -----------------------------------------------------------------------------------------------------------
+
+function whereIs(b) {
+  const card = b.card_id && cardById(b.card_id);
+  const page = card ? pageById(card.page_id) : inboxPage();
+  return card ? `${page?.title ?? '?'} › ${card.title}` : 'Nieuw';
+}
+
+function openSearch() {
+  if (document.querySelector('dialog[open]')) return;
+  openDialog(
+    null,
+    ({ close }) => {
+      const input = h('input', { class: 'input search-input', type: 'search', placeholder: 'Zoek in al je snelkoppelingen…', autocomplete: 'off', 'aria-label': 'Zoeken' });
+      const list = h('div', { class: 'search-results', role: 'listbox' });
+      let results = [];
+      let sel = 0;
+
+      const paint = () => {
+        list.replaceChildren(
+          ...(results.length
+            ? results.map((b, i) =>
+                h(
+                  'a',
+                  { class: `search-hit${i === sel ? ' selected' : ''}`, role: 'option', href: safeHref(b.url), target: linkTarget(), rel: 'noopener noreferrer', onclick: () => close(true) },
+                  faviconEl(b.url),
+                  h('span', { class: 'hit-text' }, h('span', { class: 'hit-title' }, b.title), h('span', { class: 'hit-meta' }, `${whereIs(b)} · ${hostOf(b.url)}`)),
+                ),
+              )
+            : [h('p', { class: 'search-empty' }, input.value.trim() ? 'Niets gevonden.' : 'Nog geen snelkoppelingen.')]),
+        );
+        list.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
+      };
+
+      const run = () => {
+        const tokens = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+        const all = [...state.bookmarks].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+        results = tokens.length
+          ? all.filter((b) => tokens.every((t) => `${b.title} ${b.url}`.toLowerCase().includes(t)))
+          : all;
+        results = results.slice(0, 40);
+        sel = 0;
+        paint();
+      };
+
+      input.addEventListener('input', run);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % Math.max(results.length, 1);
+          paint();
+        }
+      });
+      run();
+
+      return {
+        el: h('div', { class: 'search' }, input, list),
+        focus: () => input,
+        collect() {
+          const hit = results[sel];
+          if (hit) window.open(safeHref(hit.url), linkTarget(), 'noopener');
+          return true;
+        },
+      };
+    },
+    { footer: false, className: 'search-dialog' },
+  );
+}
+
+// ---- Inloggen en foutschermen ------------------------------------------------------------------------------------------------
+
+function authCard(children) {
+  return h('div', { class: 'auth' }, h('div', { class: 'auth-card' }, h('div', { class: 'auth-mark' }, icon('bookmark', 26)), children));
+}
+
+function renderSetupNeeded() {
+  $root.replaceChildren(
+    authCard([
+      h('h1', {}, 'Bijna klaar'),
+      h('p', { class: 'muted' }, 'Vul je Supabase anon key in bij '),
+      h('code', { class: 'secret' }, 'js/config.js'),
+      h('p', { class: 'muted' }, 'en laad de pagina opnieuw.'),
+    ]),
+  );
+}
+
+function renderFatal(err) {
+  console.error(err);
+  const missing = /ensure_user_setup|relation .* does not exist|schema cache|PGRST/i.test(err.message || '');
+  $root.replaceChildren(
+    authCard([
+      h('h1', {}, 'Er ging iets mis'),
+      h('p', { class: 'muted' }, missing ? 'De database is nog niet ingericht. Voer supabase/schema.sql uit in de Supabase SQL Editor en laad de pagina opnieuw.' : err.message || String(err)),
+      h('div', { class: 'row center' },
+        h('button', { class: 'btn primary', type: 'button', onclick: () => location.reload() }, 'Opnieuw proberen'),
+        h('button', { class: 'btn ghost', type: 'button', onclick: logout }, 'Uitloggen'),
+      ),
+    ]),
+  );
+}
+
+function renderLogin() {
+  let signup = false;
+  const form = h('form', { class: 'fields', novalidate: true });
+  const email = h('input', { class: 'input', type: 'email', autocomplete: 'username', required: true });
+  const password = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', required: true, minlength: 6 });
+  const error = h('div', { class: 'form-error', role: 'alert' });
+  const submit = h('button', { class: 'btn primary wide', type: 'submit' }, 'Inloggen');
+  const toggle = h('button', { class: 'link-btn', type: 'button' });
+  const title = h('h1', {}, 'Inloggen');
+
+  const paint = () => {
+    title.textContent = signup ? 'Account aanmaken' : 'Inloggen';
+    submit.textContent = signup ? 'Registreren' : 'Inloggen';
+    toggle.textContent = signup ? 'Heb je al een account? Inloggen' : 'Nog geen account? Registreren';
+    password.autocomplete = signup ? 'new-password' : 'current-password';
+    error.textContent = '';
+  };
+  toggle.addEventListener('click', () => {
+    signup = !signup;
+    paint();
+  });
+
+  form.append(
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'E-mailadres'), email),
+    h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Wachtwoord'), password),
+    error,
+    submit,
+    toggle,
+  );
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    error.textContent = '';
+    if (!email.value.trim() || password.value.length < 6) {
+      error.textContent = 'Vul een e-mailadres en een wachtwoord van minimaal 6 tekens in.';
+      return;
+    }
+    submit.disabled = true;
+    try {
+      if (signup) {
+        const { session } = await api.signUp(email.value.trim(), password.value);
+        if (!session) {
+          error.textContent = 'Account aangemaakt. Bevestig je e-mailadres via de mail en log daarna in.';
+          signup = false;
+          submit.disabled = false;
+          return;
+        }
+      } else {
+        await api.signIn(email.value.trim(), password.value);
+      }
+      await startApp();
+    } catch (err) {
+      error.textContent = /invalid login/i.test(err.message) ? 'Onjuist e-mailadres of wachtwoord.' : err.message;
+      submit.disabled = false;
+    }
+  });
+
+  $root.replaceChildren(authCard([title, form]));
+  paint();
+  email.focus();
+}
+
+// ---- Delen vanaf telefoon (PWA share target) en realtime ----------------------------------------------------------------------------
+
+async function handleShareTarget() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('url') && !params.has('text')) return;
+  const found = normalizeUrl(params.get('url') || '') || (params.get('text') || '').match(/https?:\/\/\S+/)?.[0];
+  history.replaceState(null, '', location.pathname + location.hash);
+  const url = found && normalizeUrl(found);
+  if (!url) return;
+  try {
+    const row = await api.insertBookmark({ card_id: null, url, title: params.get('title') || hostOf(url), position: 0 });
+    state.bookmarks.push(row);
+    go(`#/p/${inboxPage().id}`);
+    renderAll();
+    toast('Toegevoegd aan Nieuw');
+  } catch (err) {
+    toast(`Toevoegen mislukt: ${err.message}`, { error: true });
+  }
+}
+
+function onRemoteBookmark(row) {
+  if (state.bookmarks.some((b) => b.id === row.id)) return;
+  state.bookmarks.push(row);
+  renderSidebar();
+  const route = currentRoute();
+  if (route.name === 'page' && route.page?.is_inbox && !document.querySelector('dialog[open]')) renderMain();
+  toast(`Nieuw in inbox: ${row.title}`);
+}
+
+// ---- Start ------------------------------------------------------------------------------------------------------------------------------
+
+async function startApp() {
+  $root.replaceChildren(h('div', { class: 'splash' }, icon('bookmark', 32)));
+  try {
+    await api.ensureSetup();
+    Object.assign(state, await api.loadAll());
+    state.email = await api.currentEmail();
+  } catch (err) {
+    renderFatal(err);
+    return;
+  }
+  state.loaded = true;
+  lastLoad = Date.now();
+  buildShell();
+  renderAll();
+  unsubscribe?.();
+  unsubscribe = api.subscribeBookmarks(onRemoteBookmark);
+  handleShareTarget();
+}
+
+function teardown() {
+  unsubscribe?.();
+  unsubscribe = null;
+  destroySortables();
+  navSortable?.destroy();
+  Object.assign(state, { pages: [], cards: [], bookmarks: [], settings: null, email: '', loaded: false });
+  renderLogin();
+}
+
+function isTyping() {
+  const el = document.activeElement;
+  return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+}
+
+addEventListener('hashchange', () => {
+  if (!state.loaded) return;
+  closeSidebar();
+  renderAll();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && state.loaded && Date.now() - lastLoad > 30000 && !document.querySelector('dialog[open]') && !isTyping()) {
+    reload();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (!state.loaded) return;
+  const k = e.key.toLowerCase();
+  if ((k === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !isTyping() && !e.ctrlKey && !e.metaKey)) {
+    e.preventDefault();
+    openSearch();
+  }
+});
+
+applyTheme();
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
+(async function boot() {
+  if (!api.isConfigured) return renderSetupNeeded();
+  api.onSignedOut(teardown);
+  try {
+    (await api.getSession()) ? await startApp() : renderLogin();
+  } catch (err) {
+    renderFatal(err);
+  }
+})();
