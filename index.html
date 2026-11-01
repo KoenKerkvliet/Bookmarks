@@ -15,7 +15,15 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="stylesheet" href="css/styles.css">
   <script>
-    try { var t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+    // Zelfde logica als applyTheme() in js/app.js, hier vroeg om flitsen te voorkomen.
+    (function () {
+      var t = '';
+      try { t = localStorage.getItem('theme') || ''; } catch (e) {}
+      if (['light', 'dark', 'neon', 'ocean', 'forest', 'sunset'].indexOf(t) < 0) {
+        t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+      }
+      document.documentElement.dataset.theme = t;
+    })();
   </script>
 </head>
 <body>

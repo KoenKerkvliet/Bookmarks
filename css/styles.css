@@ -1,10 +1,21 @@
-/* ---- Tokens ---------------------------------------------------------------- */
+/* ---- Thema's ---------------------------------------------------------------- */
+/* Elk thema zet ALLE variabelen. De selector werkt op elk element met data-theme,
+   dus ook op de voorbeeldkaartjes in Instellingen. Zonder data-theme geldt Licht. */
 :root {
+  --radius: 14px;
+  --radius-sm: 9px;
+  --sidebar-w: 264px;
+}
+
+:root,
+[data-theme='light'] {
   --primary: #9e86ff;
   --primary-hover: #8e74f7;
   --primary-strong: #5b3fd1; /* tekst/accenten op lichte achtergrond (contrast) */
   --primary-soft: #efebff;
   --on-primary: #1b1233; /* #9E86FF is licht: donkere tekst haalt AA, witte niet */
+  --accent-2: #9e86ff;
+  --brand-bg: var(--primary);
 
   --bg: #f6f5fa;
   --surface: #ffffff;
@@ -13,20 +24,30 @@
   --text: #1d1b2a;
   --text-2: #6a6780;
   --danger: #c93a47;
+  --on-danger: #ffffff;
   --danger-soft: #fdecee;
+
   --shadow: 0 1px 2px rgb(30 20 80 / 0.06), 0 4px 16px rgb(30 20 80 / 0.06);
   --shadow-lg: 0 12px 40px rgb(30 20 80 / 0.22);
+  --glow: 0 0 0 0 transparent;
+  --text-glow: none;
+  --card-hover: var(--border);
 
-  --radius: 14px;
-  --radius-sm: 9px;
-  --sidebar-w: 264px;
+  --toast-bg: #25213a;
+  --toast-text: #ffffff;
+  --toast-action: #b9a8ff;
   color-scheme: light;
 }
 
-:root[data-theme='dark'] {
+[data-theme='dark'] {
+  --primary: #9e86ff;
   --primary-hover: #b3a0ff;
   --primary-strong: #b9a8ff;
   --primary-soft: #2b2447;
+  --on-primary: #1b1233;
+  --accent-2: #9e86ff;
+  --brand-bg: var(--primary);
+
   --bg: #14121c;
   --surface: #1d1a29;
   --surface-2: #26223a;
@@ -34,29 +55,147 @@
   --text: #ece9f7;
   --text-2: #a29fb8;
   --danger: #ff7580;
+  --on-danger: #2a0a0e;
   --danger-soft: #3a1f26;
+
   --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
   --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.6);
+  --glow: 0 0 0 0 transparent;
+  --text-glow: none;
+  --card-hover: var(--border);
+
+  --toast-bg: #2f2a47;
+  --toast-text: #ece9f7;
+  --toast-action: #b9a8ff;
   color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) {
-    --primary-hover: #b3a0ff;
-    --primary-strong: #b9a8ff;
-    --primary-soft: #2b2447;
-    --bg: #14121c;
-    --surface: #1d1a29;
-    --surface-2: #26223a;
-    --border: #322e46;
-    --text: #ece9f7;
-    --text-2: #a29fb8;
-    --danger: #ff7580;
-    --danger-soft: #3a1f26;
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 4px 16px rgb(0 0 0 / 0.25);
-    --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.6);
-    color-scheme: dark;
-  }
+/* Neon: bijna zwart met cyaan en magenta gloed */
+[data-theme='neon'] {
+  --primary: #00e5ff;
+  --primary-hover: #5cf0ff;
+  --primary-strong: #4df0ff;
+  --primary-soft: #0c2733;
+  --on-primary: #021419;
+  --accent-2: #ff2bd6;
+  --brand-bg: linear-gradient(135deg, #00e5ff, #ff2bd6);
+
+  --bg: #08080f;
+  --surface: #0f0f1a;
+  --surface-2: #181828;
+  --border: #272744;
+  --text: #eef0ff;
+  --text-2: #9a9cc2;
+  --danger: #ff5d73;
+  --on-danger: #1c0509;
+  --danger-soft: #2b1220;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 4px 18px rgb(0 0 0 / 0.45);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.7);
+  --glow: 0 0 14px rgb(0 229 255 / 0.35);
+  --text-glow: 0 0 14px rgb(0 229 255 / 0.5);
+  --card-hover: #00e5ff;
+
+  --toast-bg: #181828;
+  --toast-text: #eef0ff;
+  --toast-action: #4df0ff;
+  color-scheme: dark;
+}
+
+/* Oceaan: diepblauw met zeeblauwe accenten */
+[data-theme='ocean'] {
+  --primary: #38bdf8;
+  --primary-hover: #7dd3fc;
+  --primary-strong: #7dd3fc;
+  --primary-soft: #12324a;
+  --on-primary: #04202e;
+  --accent-2: #2dd4bf;
+  --brand-bg: linear-gradient(135deg, #38bdf8, #2dd4bf);
+
+  --bg: #0a1624;
+  --surface: #112238;
+  --surface-2: #19304d;
+  --border: #264563;
+  --text: #e8f1fb;
+  --text-2: #93abc4;
+  --danger: #ff8080;
+  --on-danger: #2a0a0a;
+  --danger-soft: #3a1c24;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 4px 16px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.6);
+  --glow: 0 0 0 0 transparent;
+  --text-glow: none;
+  --card-hover: var(--border);
+
+  --toast-bg: #19304d;
+  --toast-text: #e8f1fb;
+  --toast-action: #7dd3fc;
+  color-scheme: dark;
+}
+
+/* Bos: licht met zachte groentinten */
+[data-theme='forest'] {
+  --primary: #5fbf80;
+  --primary-hover: #52b073;
+  --primary-strong: #1f7a43;
+  --primary-soft: #e0f1e6;
+  --on-primary: #0d2415;
+  --accent-2: #d98a1f;
+  --brand-bg: linear-gradient(135deg, #5fbf80, #a3d977);
+
+  --bg: #f1f5ef;
+  --surface: #ffffff;
+  --surface-2: #e8efe4;
+  --border: #d4dfce;
+  --text: #17261b;
+  --text-2: #586a5d;
+  --danger: #b83a3a;
+  --on-danger: #ffffff;
+  --danger-soft: #fbeaea;
+
+  --shadow: 0 1px 2px rgb(20 50 30 / 0.07), 0 4px 16px rgb(20 50 30 / 0.07);
+  --shadow-lg: 0 12px 40px rgb(20 50 30 / 0.24);
+  --glow: 0 0 0 0 transparent;
+  --text-glow: none;
+  --card-hover: var(--border);
+
+  --toast-bg: #1f2e24;
+  --toast-text: #ffffff;
+  --toast-action: #7bd99a;
+  color-scheme: light;
+}
+
+/* Zonsondergang: warm donker met koraal en roze */
+[data-theme='sunset'] {
+  --primary: #ff8a5b;
+  --primary-hover: #ffa27c;
+  --primary-strong: #ffa987;
+  --primary-soft: #3d2421;
+  --on-primary: #2a0f05;
+  --accent-2: #ff5c8a;
+  --brand-bg: linear-gradient(135deg, #ff8a5b, #ff5c8a);
+
+  --bg: #190f14;
+  --surface: #251920;
+  --surface-2: #33232b;
+  --border: #4a323c;
+  --text: #fbeee6;
+  --text-2: #c9aca3;
+  --danger: #ff6b86;
+  --on-danger: #2a0510;
+  --danger-soft: #3a1822;
+
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 4px 16px rgb(0 0 0 / 0.3);
+  --shadow-lg: 0 12px 40px rgb(0 0 0 / 0.65);
+  --glow: 0 0 0 0 transparent;
+  --text-glow: none;
+  --card-hover: var(--border);
+
+  --toast-bg: #33232b;
+  --toast-text: #fbeee6;
+  --toast-action: #ffa987;
+  color-scheme: dark;
 }
 
 /* ---- Basis ---------------------------------------------------------------- */
@@ -156,6 +295,7 @@ a {
   border-color: var(--primary);
   color: var(--on-primary);
   font-weight: 600;
+  box-shadow: var(--glow);
 }
 
 .btn.primary:hover {
@@ -188,7 +328,7 @@ a {
 .btn.danger {
   background: var(--danger);
   border-color: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
   font-weight: 600;
 }
 
@@ -351,8 +491,9 @@ a {
   width: 32px;
   height: 32px;
   border-radius: 9px;
-  background: var(--primary);
+  background: var(--brand-bg);
   color: var(--on-primary);
+  box-shadow: var(--glow);
 }
 
 .brand-name {
@@ -409,6 +550,7 @@ kbd {
   background: var(--primary-soft);
   color: var(--primary-strong);
   font-weight: 600;
+  box-shadow: var(--glow);
 }
 
 .nav-label {
@@ -424,6 +566,7 @@ kbd {
   border-radius: 999px;
   background: var(--primary);
   color: var(--on-primary);
+  box-shadow: var(--glow);
   font-size: 12px;
   font-weight: 700;
   text-align: center;
@@ -502,6 +645,7 @@ kbd {
   margin-left: -8px;
   font-size: 22px;
   font-weight: 700;
+  text-shadow: var(--text-glow);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -577,6 +721,12 @@ body.dragging .column {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.card:hover {
+  border-color: var(--card-hover);
+  box-shadow: var(--shadow), var(--glow);
 }
 
 .card-head {
@@ -804,6 +954,7 @@ body.dragging .column {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+  text-shadow: var(--text-glow);
 }
 
 .w-clock-date {
@@ -851,12 +1002,12 @@ body.dragging .column {
 }
 
 .w-clock-analog .hand.second {
-  stroke: var(--primary);
+  stroke: var(--accent-2);
   stroke-width: 1.4;
 }
 
 .w-clock-analog .pin {
-  fill: var(--primary);
+  fill: var(--accent-2);
 }
 
 .w-weather {
@@ -880,6 +1031,7 @@ body.dragging .column {
   font-size: 36px;
   font-weight: 700;
   line-height: 1.1;
+  text-shadow: var(--text-glow);
 }
 
 .w-cond {
@@ -1247,6 +1399,100 @@ body.dragging .column {
   white-space: pre;
 }
 
+/* Themakiezer */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.theme-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+}
+
+.theme-tile:hover {
+  border-color: var(--primary-strong);
+}
+
+.theme-tile[aria-checked='true'] {
+  border-color: var(--primary-strong);
+  outline: 2px solid var(--primary-strong);
+  outline-offset: -1px;
+}
+
+.theme-tile strong {
+  padding: 0 4px;
+  font-size: 14px;
+}
+
+.theme-tile .theme-hint {
+  padding: 0 4px 4px;
+  margin-top: -6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.theme-preview {
+  display: flex;
+  gap: 5px;
+  height: 64px;
+  padding: 7px;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.theme-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  height: 64px;
+  overflow: hidden;
+  border-radius: 10px;
+}
+
+.theme-split .theme-preview {
+  border-radius: 0;
+  border-width: 1px 0;
+}
+
+.tp-side {
+  flex: none;
+  width: 22%;
+  background: var(--surface);
+  border-radius: 5px;
+}
+
+.tp-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.tp-card {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.tp-bar {
+  height: 8px;
+  width: 55%;
+  background: var(--primary);
+  border-radius: 4px;
+  box-shadow: var(--glow);
+}
+
 .import-list {
   max-height: 220px;
   margin: 0;
@@ -1437,8 +1683,9 @@ summary {
   justify-content: space-between;
   gap: 14px;
   padding: 11px 16px;
-  background: #25213a;
-  color: #fff;
+  background: var(--toast-bg);
+  color: var(--toast-text);
+  border: 1px solid color-mix(in srgb, var(--toast-text) 14%, transparent);
   border-radius: 12px;
   box-shadow: var(--shadow-lg);
   pointer-events: auto;
@@ -1453,7 +1700,7 @@ summary {
   background: none;
   border: 0;
   padding: 2px 4px;
-  color: var(--primary);
+  color: var(--toast-action);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -1492,8 +1739,9 @@ summary {
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  background: var(--primary);
+  background: var(--brand-bg);
   color: var(--on-primary);
+  box-shadow: var(--glow);
 }
 
 .auth-card h1 {

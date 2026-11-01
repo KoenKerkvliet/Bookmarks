@@ -39,10 +39,69 @@ const prefs = {
   },
 };
 
+const THEMES = [
+  { id: 'light', label: 'Licht', hint: 'Rustig wit' },
+  { id: 'dark', label: 'Donker', hint: 'Zacht donker met paars' },
+  { id: 'neon', label: 'Neon', hint: 'Zwart met neon-gloed' },
+  { id: 'ocean', label: 'Oceaan', hint: 'Diepblauw' },
+  { id: 'forest', label: 'Bos', hint: 'Licht met groen' },
+  { id: 'sunset', label: 'Zonsondergang', hint: 'Warm donker' },
+];
+
+// Opgeslagen voorkeur: een thema-id, of leeg = automatisch (volgt het systeem).
 function applyTheme() {
-  const t = prefs.get('theme');
-  if (t) document.documentElement.dataset.theme = t;
-  else delete document.documentElement.dataset.theme;
+  const stored = prefs.get('theme');
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = THEMES.some((t) => t.id === stored) ? stored : dark ? 'dark' : 'light';
+  document.documentElement.dataset.theme = theme;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  if (bg) document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bg);
+}
+
+function setTheme(id) {
+  prefs.set('theme', id);
+  applyTheme();
+}
+
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (!prefs.get('theme')) applyTheme();
+});
+
+function themeMenu(anchor) {
+  const current = prefs.get('theme');
+  showMenu(anchor, [
+    { label: 'Automatisch', checked: !THEMES.some((t) => t.id === current), onClick: () => setTheme('') },
+    '-',
+    ...THEMES.map((t) => ({ label: t.label, checked: current === t.id, onClick: () => setTheme(t.id) })),
+  ]);
+}
+
+function miniPreview(id) {
+  return h('span', { class: 'theme-preview', dataset: { theme: id }, 'aria-hidden': 'true' }, h('i', { class: 'tp-side' }), h('span', { class: 'tp-main' }, h('i', { class: 'tp-bar' }), h('i', { class: 'tp-card' })));
+}
+
+function themePicker() {
+  const current = THEMES.some((t) => t.id === prefs.get('theme')) ? prefs.get('theme') : '';
+  const options = [{ id: '', label: 'Automatisch', hint: 'Volgt je systeem (licht of donker)' }, ...THEMES];
+  const tiles = options.map((t) =>
+    h(
+      'button',
+      {
+        type: 'button',
+        role: 'radio',
+        class: 'theme-tile',
+        'aria-checked': String(t.id === current),
+        onclick: () => {
+          setTheme(t.id);
+          tiles.forEach((el, i) => el.setAttribute('aria-checked', String(options[i].id === t.id)));
+        },
+      },
+      t.id ? miniPreview(t.id) : h('span', { class: 'theme-split', 'aria-hidden': 'true' }, miniPreview('light'), miniPreview('dark')),
+      h('strong', {}, t.label),
+      h('span', { class: 'theme-hint' }, t.hint),
+    ),
+  );
+  return h('div', { class: 'theme-grid', role: 'radiogroup', 'aria-label': 'Thema' }, tiles);
 }
 
 const linkTarget = () => (prefs.get('openIn', 'blank') === 'self' ? '_self' : '_blank');
@@ -632,7 +691,6 @@ function renderSidebar() {
   const inbox = inboxPage();
   const count = inboxLinks().length;
   const pages = userPages();
-  const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
 
   const list = h('nav', { class: 'nav-pages', 'aria-label': "Pagina's" }, pages.map((p) => navItem(p, route)));
 
@@ -655,11 +713,7 @@ function renderSidebar() {
       'div',
       { class: 'sidebar-foot' },
       h('a', { class: `nav-item${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen' }, icon('settings', 18), h('span', { class: 'nav-label' }, 'Instellingen')),
-      iconButton(dark ? 'sun' : 'moon', dark ? 'Lichte weergave' : 'Donkere weergave', () => {
-        prefs.set('theme', dark ? 'light' : 'dark');
-        applyTheme();
-        renderSidebar();
-      }),
+      iconButton('palette', 'Thema kiezen', (e) => themeMenu(e.currentTarget)),
     ),
     ].filter(Boolean),
   );
@@ -993,11 +1047,9 @@ Content-Type: application/json
           importInput,
         ),
       ),
+      section('Thema', themePicker()),
       section(
         'Weergave',
-        h('div', { class: 'row' }, h('span', { class: 'label' }, 'Thema'),
-          segmented([{ value: '', label: 'Automatisch' }, { value: 'light', label: 'Licht' }, { value: 'dark', label: 'Donker' }], prefs.get('theme'), (v) => { prefs.set('theme', v); applyTheme(); renderSidebar(); }),
-        ),
         h('div', { class: 'row' }, h('span', { class: 'label' }, 'Links openen'),
           segmented([{ value: 'blank', label: 'Nieuw tabblad' }, { value: 'self', label: 'Zelfde venster' }], prefs.get('openIn', 'blank'), (v) => { prefs.set('openIn', v); }),
         ),
