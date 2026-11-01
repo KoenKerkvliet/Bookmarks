@@ -10,6 +10,7 @@ const SHELL = [
   'js/api.js',
   'js/ui.js',
   'js/config.js',
+  'js/importer.js',
   'vendor/supabase.js',
   'vendor/Sortable.min.js',
   'icons/icon.svg',

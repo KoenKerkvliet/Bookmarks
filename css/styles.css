@@ -927,6 +927,19 @@ body.dragging .column {
   white-space: pre;
 }
 
+.import-list {
+  max-height: 220px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  overflow-y: auto;
+  font-size: 14px;
+  color: var(--text-2);
+}
+
+.import-list strong {
+  color: var(--text);
+}
+
 summary {
   cursor: pointer;
   font-weight: 500;

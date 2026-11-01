@@ -71,6 +71,14 @@ async function saveCurrentTab() {
 
 Lekt je sleutel? Klik in Instellingen op **Nieuwe sleutel**; de oude werkt dan direct niet meer.
 
+## Importeren uit start.me
+
+1. Exporteer in start.me via **Export → Export bookmarks** (HTML-bestand).
+2. Open op de site **Instellingen → Importeren** en kies het bestand.
+3. Je ziet eerst een samenvatting. Na bevestigen worden pagina's (met hun kolomaantal), cards en links toegevoegd als nieuwe pagina's; bestaande pagina's blijven staan. Mislukt de import halverwege, dan wordt alles teruggedraaid.
+
+Start.me bewaart geen kolompositie van widgets, dus de cards worden evenwichtig over de kolommen verdeeld. Alle cards krijgen de weergave Lijst. Importeer één keer: een tweede import voegt alles nogmaals toe. Bladwijzerbestanden van Chrome, Firefox en Edge worden ook gelezen (mappen worden pagina's of cards), maar die zijn niet uitgebreid getest. Zet het exportbestand niet in de repository; `Export-*.html` staat in `.gitignore`.
+
 ## Opbouw
 
 | Pad | Inhoud |
@@ -79,6 +87,7 @@ Lekt je sleutel? Klik in Instellingen op **Nieuwe sleutel**; de oude werkt dan d
 | `js/app.js` | Applicatielogica en views |
 | `js/api.js` | Alle Supabase-aanroepen |
 | `js/ui.js` | Menu's, dialogen, toasts, iconen |
+| `js/importer.js` | Parser voor bladwijzer-HTML (start.me e.a.) |
 | `sw.js`, `manifest.webmanifest`, `icons/` | PWA |
 | `vendor/` | `supabase-js` 2.49.4 en SortableJS 1.15.6 (lokaal, geen CDN nodig) |
 | `supabase/schema.sql` | Tabellen, RLS-beleid en functies |

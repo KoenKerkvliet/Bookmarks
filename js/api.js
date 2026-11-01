@@ -82,6 +82,14 @@ const insert = async (table, row) => check(await sb.from(table).insert(row).sele
 const patch = async (table, id, values) => check(await sb.from(table).update(values).eq('id', id));
 const remove = async (table, id) => check(await sb.from(table).delete().eq('id', id));
 
+// Bulk-insert (voor importeren); rijen mogen een eigen id meekrijgen.
+export async function insertMany(table, rows) {
+  const size = 300;
+  for (let i = 0; i < rows.length; i += size) {
+    check(await sb.from(table).insert(rows.slice(i, i + size)));
+  }
+}
+
 export const insertPage = (row) => insert('pages', row);
 export const patchPage = (id, v) => patch('pages', id, v);
 export const removePage = (id) => remove('pages', id);

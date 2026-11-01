@@ -1,5 +1,6 @@
 import * as api from './api.js';
 import { h, icon, showMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
+import { parseBookmarksHtml } from './importer.js';
 
 const VIEWS = [
   { value: 'list', label: 'Lijst' },
@@ -819,6 +820,16 @@ Content-Type: application/json
 { "p_key": "<jouw API-sleutel>", "p_url": "https://voorbeeld.nl", "p_title": "Titel van de pagina" }`;
 
   const section = (title, ...kids) => h('section', { class: 'panel' }, h('h2', {}, title), kids);
+  const importInput = h('input', {
+    type: 'file',
+    accept: '.html,.htm,text/html',
+    hidden: true,
+    onchange: (e) => {
+      const file = e.target.files[0];
+      e.target.value = '';
+      if (file) importFile(file);
+    },
+  });
 
   return h(
     'div',
@@ -843,6 +854,14 @@ Content-Type: application/json
         ),
       ),
       section(
+        'Importeren',
+        h('p', { class: 'muted' }, 'Importeer de HTML-export van start.me (of een bladwijzerbestand van Chrome, Firefox of Edge). Pagina’s en mappen worden nieuwe pagina’s en cards; bestaande pagina’s blijven ongemoeid.'),
+        h('div', { class: 'row' },
+          h('button', { class: 'btn', type: 'button', onclick: () => importInput.click() }, icon('plus', 16), h('span', {}, 'Bestand kiezen…')),
+          importInput,
+        ),
+      ),
+      section(
         'Weergave',
         h('div', { class: 'row' }, h('span', { class: 'label' }, 'Thema'),
           segmented([{ value: '', label: 'Automatisch' }, { value: 'light', label: 'Licht' }, { value: 'dark', label: 'Donker' }], prefs.get('theme'), (v) => { prefs.set('theme', v); applyTheme(); renderSidebar(); }),
@@ -858,6 +877,62 @@ Content-Type: application/json
       ),
     ),
   );
+}
+
+async function importFile(file) {
+  let parsed;
+  try {
+    parsed = parseBookmarksHtml(await file.text());
+  } catch (err) {
+    toast(`Bestand lezen mislukt: ${err.message}`, { error: true });
+    return;
+  }
+  const { totals, pages, stray } = parsed;
+  if (!totals.links) {
+    toast('Geen snelkoppelingen gevonden in dit bestand.', { error: true });
+    return;
+  }
+
+  const summary = h(
+    'div',
+    { class: 'fields' },
+    h('p', { class: 'dialog-text' }, `Gevonden: ${totals.pages} pagina’s, ${totals.cards} cards en ${totals.links} snelkoppelingen. Ze worden als nieuwe pagina’s toegevoegd.`),
+    h('ul', { class: 'import-list' }, pages.map((p) => h('li', {}, h('strong', {}, p.title), ` — ${p.cards.length} cards, ${p.cards.reduce((n, c) => n + c.links.length, 0)} links`))),
+    stray.length ? h('p', { class: 'dialog-text' }, `${stray.length} losse link${stray.length === 1 ? '' : 's'} komen in Nieuw.`) : null,
+  );
+  const ok = await openDialog('Importeren?', { el: summary, collect: () => true }, { submit: 'Importeren' });
+  if (!ok) return;
+
+  const pageRows = [];
+  const cardRows = [];
+  const bookmarkRows = [];
+  let pos = Math.max(-1, ...userPages().map((p) => p.position)) + 1;
+  for (const p of pages) {
+    const pageId = crypto.randomUUID();
+    pageRows.push({ id: pageId, title: p.title, columns: p.columns, position: pos++ });
+    for (const c of p.cards) {
+      const cardId = crypto.randomUUID();
+      cardRows.push({ id: cardId, page_id: pageId, title: c.title, column_index: c.column_index, position: c.position, view: 'list' });
+      c.links.forEach((l, i) => bookmarkRows.push({ card_id: cardId, title: l.title, url: l.url, position: i }));
+    }
+  }
+  stray.forEach((l) => bookmarkRows.push({ card_id: null, title: l.title, url: l.url, position: 0 }));
+
+  toast('Bezig met importeren…', { duration: 2500 });
+  try {
+    await api.insertMany('pages', pageRows);
+    await api.insertMany('cards', cardRows);
+    await api.insertMany('bookmarks', bookmarkRows);
+  } catch (err) {
+    // terugdraaien: het verwijderen van de pagina’s verwijdert ook hun cards en links
+    await Promise.allSettled(pageRows.map((p) => api.removePage(p.id)));
+    toast(`Importeren mislukt, er is niets toegevoegd: ${err.message}`, { error: true });
+    await reload();
+    return;
+  }
+  await reload();
+  if (pageRows.length) go(`#/p/${pageRows[0].id}`);
+  toast(`Geïmporteerd: ${totals.pages} pagina’s, ${totals.cards} cards, ${totals.links} links`);
 }
 
 async function regenerateKey() {
