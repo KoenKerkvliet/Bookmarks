@@ -1,6 +1,7 @@
 import * as api from './api.js';
 import { h, icon, showMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
+import { WIDGETS } from './widgets.js';
 
 const VIEWS = [
   { value: 'list', label: 'Lijst' },
@@ -54,6 +55,8 @@ const userPages = () => state.pages.filter((p) => !p.is_inbox).sort(byPos);
 const pageById = (id) => state.pages.find((p) => p.id === id);
 const cardById = (id) => state.cards.find((c) => c.id === id);
 const pageCards = (pageId) => state.cards.filter((c) => c.page_id === pageId);
+const cardType = (card) => card.type ?? 'links';
+const isLinksCard = (card) => cardType(card) === 'links';
 const cardLinks = (cardId) => state.bookmarks.filter((b) => b.card_id === cardId).sort(byPos);
 const inboxLinks = () =>
   state.bookmarks.filter((b) => !b.card_id).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
@@ -303,7 +306,7 @@ async function moveLink(b) {
     const newRow = h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Naam nieuwe card'), newTitle, h('div', { class: 'field-error' }));
 
     const fill = (preferred) => {
-      const cards = pageCards(pageSel.value).sort((a, c) => a.column_index - c.column_index || a.position - c.position);
+      const cards = pageCards(pageSel.value).filter(isLinksCard).sort((a, c) => a.column_index - c.column_index || a.position - c.position);
       cardSel.replaceChildren(
         ...cards.map((c) => h('option', { value: c.id, selected: c.id === preferred }, c.title)),
         h('option', { value: '__new', selected: !cards.length }, '＋ Nieuwe card…'),
@@ -367,25 +370,88 @@ async function moveLink(b) {
 
 // ---- Acties: cards ----------------------------------------------------------------------------
 
-async function addCard(page) {
-  const r = await openDialog(
-    'Nieuwe card',
-    fieldsBody([
-      { name: 'title', label: 'Titel', required: true, maxlength: 100 },
-      { name: 'view', label: 'Weergave', type: 'segmented', options: VIEWS, value: 'list' },
-    ]),
-    { submit: 'Aanmaken' },
+function pickCardType() {
+  const types = [{ type: 'links', label: 'Snelkoppelingen', hint: 'Lijst of iconen', icon: 'link' }, ...Object.entries(WIDGETS).map(([type, w]) => ({ type, ...w }))];
+  return openDialog(
+    'Wat wil je toevoegen?',
+    ({ close }) => ({
+      el: h(
+        'div',
+        { class: 'type-grid' },
+        types.map((t) => h('button', { class: 'type-tile', type: 'button', onclick: () => close(t.type) }, icon(t.icon, 22), h('strong', {}, t.label), h('span', {}, t.hint))),
+      ),
+      collect: () => undefined,
+    }),
+    { footer: false, className: 'type-dialog' },
   );
-  if (!r) return;
+}
+
+async function addCard(page) {
+  const type = await pickCardType();
+  if (!type) return;
+
+  const fields = {};
+  let title;
+  if (type === 'links') {
+    const r = await openDialog(
+      'Nieuwe card',
+      fieldsBody([
+        { name: 'title', label: 'Titel', required: true, maxlength: 100 },
+        { name: 'view', label: 'Weergave', type: 'segmented', options: VIEWS, value: 'list' },
+      ]),
+      { submit: 'Aanmaken' },
+    );
+    if (!r) return;
+    title = r.title;
+    fields.view = r.view;
+  } else {
+    const def = WIDGETS[type];
+    title = def.title;
+    fields.type = type;
+    fields.config = structuredClone(def.defaults);
+    if (def.configure) {
+      const r = await def.configure(fields.config, { title });
+      if (!r) return;
+      fields.config = r.config;
+      title = r.title ?? r.softTitle ?? title;
+    }
+  }
+
   const col = leastFilledColumn(page);
   const position = pageCards(page.id).filter((c) => Math.min(c.column_index, page.columns - 1) === col).length;
   try {
-    const row = await api.insertCard({ page_id: page.id, title: r.title, view: r.view, column_index: col, position });
+    const row = await api.insertCard({ page_id: page.id, title, view: 'list', ...fields, column_index: col, position });
     state.cards.push(row);
     renderMain();
   } catch (err) {
-    toast(`Aanmaken mislukt: ${err.message}`, { error: true });
+    const hint = /type|config/i.test(err.message) ? ' (voer eerst supabase/migrations/002_widgets.sql uit)' : '';
+    toast(`Aanmaken mislukt: ${err.message}${hint}`, { error: true });
   }
+}
+
+async function configureCard(card) {
+  const def = WIDGETS[card.type];
+  if (!def?.configure) return;
+  const previousCity = card.config?.city ?? card.config?.tz?.split('/').pop().replace(/_/g, ' ');
+  const r = await def.configure({ ...def.defaults, ...card.config }, { title: card.title });
+  if (!r) return;
+  card.config = r.config;
+  if (r.title) card.title = r.title;
+  else if (r.softTitle && (card.title === def.title || card.title === previousCity)) card.title = r.softTitle;
+  renderMain();
+  persist(api.patchCard(card.id, { config: card.config, title: card.title }));
+}
+
+const saveTimers = new Map();
+function saveCardConfig(card, delay = 400) {
+  clearTimeout(saveTimers.get(card.id));
+  saveTimers.set(
+    card.id,
+    setTimeout(() => {
+      saveTimers.delete(card.id);
+      persist(api.patchCard(card.id, { config: card.config }));
+    }, delay),
+  );
 }
 
 async function renameCard(card) {
@@ -423,6 +489,16 @@ async function deleteCard(card) {
 }
 
 function cardMenu(card, anchor) {
+  if (!isLinksCard(card)) {
+    const def = WIDGETS[card.type];
+    showMenu(anchor, [
+      def?.configure ? { label: 'Instellingen…', icon: 'settings', onClick: () => configureCard(card) } : null,
+      { label: 'Naam wijzigen', icon: 'pencil', onClick: () => renameCard(card) },
+      '-',
+      { label: 'Card verwijderen', icon: 'trash', danger: true, onClick: () => deleteCard(card) },
+    ].filter(Boolean));
+    return;
+  }
   showMenu(anchor, [
     { label: 'Link toevoegen', icon: 'plus', onClick: () => addLink(card) },
     '-',
@@ -577,9 +653,12 @@ function renderSidebar() {
 
 // ---- Weergave: hoofdgebied ----------------------------------------------------------------------------------
 
+const widgetCleanups = [];
+
 function destroySortables() {
   sortables.forEach((s) => s.destroy());
   sortables = [];
+  widgetCleanups.splice(0).forEach((fn) => fn?.());
 }
 
 function renderMain() {
@@ -673,7 +752,26 @@ function boardView(page) {
   return wrap;
 }
 
+function widgetCardEl(card) {
+  const def = WIDGETS[card.type];
+  const body = h('div', { class: `widget-body widget-${card.type}` });
+  if (def) {
+    const widget = def.render(card, { saveConfig: (delay) => saveCardConfig(card, delay), linkTarget: linkTarget() });
+    widgetCleanups.push(widget.destroy);
+    body.append(widget.el);
+  } else {
+    body.append(h('p', { class: 'muted' }, `Onbekend widget-type “${card.type}”.`));
+  }
+  return h(
+    'article',
+    { class: 'card widget-card', dataset: { id: card.id } },
+    h('header', { class: 'card-head' }, h('h2', { class: 'card-title', title: card.title }, card.title), iconButton('dots', 'Card-opties', (e) => cardMenu(card, e.currentTarget), 'small')),
+    body,
+  );
+}
+
 function cardEl(card) {
+  if (!isLinksCard(card)) return widgetCardEl(card);
   return h(
     'article',
     { class: 'card', dataset: { id: card.id } },

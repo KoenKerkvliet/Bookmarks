@@ -550,16 +550,21 @@ input.page-title:focus {
   display: grid;
   grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
   gap: 16px;
-  align-items: start;
+  align-items: stretch;
   padding: 8px 20px 40px;
 }
 
 .column {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 16px;
-  min-height: 90px;
+  min-height: max(90px, 45vh); /* lege ruimte onder de cards is ook een dropzone */
   border-radius: var(--radius);
+}
+
+.column > .card {
+  flex: none;
 }
 
 body.dragging .column {
@@ -768,6 +773,321 @@ body.dragging .column {
 
 .view-icons-l .fav {
   border-radius: 12px;
+}
+
+/* ---- Widgets ------------------------------------------------------------------------- */
+.widget-card .card-head {
+  padding-bottom: 0;
+}
+
+.widget-body {
+  padding: 6px 16px 16px;
+}
+
+.w-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: center;
+}
+
+.w-clock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.w-clock-digital {
+  font-size: clamp(30px, 4.2vw, 46px);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.w-clock-date {
+  color: var(--text-2);
+  text-transform: capitalize;
+}
+
+.w-clock-analog {
+  width: min(170px, 100%);
+}
+
+.w-clock-analog svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.w-clock-analog .face {
+  fill: var(--surface-2);
+  stroke: var(--border);
+  stroke-width: 1.5;
+}
+
+.w-clock-analog .tick {
+  stroke: var(--text-2);
+  stroke-width: 1;
+}
+
+.w-clock-analog .tick.major {
+  stroke: var(--text);
+  stroke-width: 2;
+}
+
+.w-clock-analog .hand {
+  stroke: var(--text);
+  stroke-linecap: round;
+}
+
+.w-clock-analog .hand.hour {
+  stroke-width: 4;
+}
+
+.w-clock-analog .hand.minute {
+  stroke-width: 2.6;
+}
+
+.w-clock-analog .hand.second {
+  stroke: var(--primary);
+  stroke-width: 1.4;
+}
+
+.w-clock-analog .pin {
+  fill: var(--primary);
+}
+
+.w-weather {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.w-now {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.w-emoji {
+  font-size: 46px;
+  line-height: 1;
+}
+
+.w-temp {
+  font-size: 36px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.w-cond {
+  color: var(--text-2);
+}
+
+.w-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.w-days {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.w-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.w-day-name {
+  color: var(--text-2);
+  text-transform: capitalize;
+}
+
+.w-day-icon {
+  font-size: 22px;
+}
+
+.w-day-temp {
+  font-weight: 600;
+}
+
+.w-day-temp .low {
+  font-weight: 400;
+  color: var(--text-2);
+}
+
+.w-countdown {
+  padding: 6px 0;
+}
+
+.w-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.w-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 2px;
+  background: var(--primary-soft);
+  border-radius: var(--radius-sm);
+}
+
+.w-tile .num {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  color: var(--primary-strong);
+}
+
+.w-tile .unit {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.w-note {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  padding: 8px 10px;
+  resize: none;
+  font: inherit;
+  color: inherit;
+  background: var(--surface-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  line-height: 1.5;
+}
+
+.w-note:focus {
+  outline: none;
+  background: var(--surface);
+  border-color: var(--primary);
+}
+
+.w-todo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 10px;
+  padding: 0;
+  list-style: none;
+}
+
+.w-todo li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.w-todo input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  accent-color: var(--primary);
+}
+
+.w-todo-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.w-todo li.done .w-todo-text {
+  color: var(--text-2);
+  text-decoration: line-through;
+}
+
+.w-todo-del {
+  font-size: 18px;
+  opacity: 0;
+}
+
+.w-todo li:hover .w-todo-del,
+.w-todo-del:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .w-todo-del {
+    opacity: 0.7;
+  }
+}
+
+.w-todo-add,
+.w-search {
+  display: flex;
+  gap: 8px;
+}
+
+.w-todo-foot {
+  margin-top: 6px;
+}
+
+.w-todo-foot:empty {
+  display: none;
+}
+
+.row .input {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+.type-dialog {
+  width: min(560px, calc(100vw - 24px));
+}
+
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.type-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  text-align: left;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.type-tile:hover,
+.type-tile:focus-visible {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+
+.type-tile .icon {
+  margin-bottom: 4px;
+  color: var(--primary-strong);
+}
+
+.type-tile span:not(.icon) {
+  font-size: 13px;
+  color: var(--text-2);
 }
 
 /* ---- Inbox ------------------------------------------------------------------------- */

@@ -7,6 +7,7 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 - Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's herschikken in de zijbalk
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
+- Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube). Ze slepen, hernoemen en verwijderen net als andere cards
 - Vaste pagina **Nieuw**: hier komen links binnen die je via de browserextensie opslaat; met één klik verplaats je ze naar de juiste pagina en card
 - Zoeken door al je links (`/` of `Ctrl+K`), licht/donker thema, realtime updates vanuit de extensie
 - Op Android delen vanuit een andere app naar Bookmarks (PWA share target) landt ook in **Nieuw**
@@ -35,6 +36,10 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 4. Open de site in Chrome/Edge en kies **Installeren** (of op iOS: Deel > Zet op beginscherm).
 
 Lokaal testen kan met een willekeurige statische server, bijvoorbeeld `python -m http.server 8000` in deze map.
+
+### Bestaande installatie bijwerken (widgets)
+
+Heb je het schema al eerder uitgevoerd? Draai dan eenmalig [`supabase/migrations/002_widgets.sql`](supabase/migrations/002_widgets.sql) in de SQL Editor. Zonder deze stap werken je bestaande cards gewoon door, maar kun je geen widgets toevoegen. Het weer haalt gegevens op bij Open-Meteo; daarvoor wordt alleen de plaatsnaam en locatie van je widget gedeeld.
 
 ## Extensie koppelen
 
@@ -88,6 +93,7 @@ Start.me bewaart geen kolompositie van widgets, dus de cards worden evenwichtig 
 | `js/api.js` | Alle Supabase-aanroepen |
 | `js/ui.js` | Menu's, dialogen, toasts, iconen |
 | `js/importer.js` | Parser voor bladwijzer-HTML (start.me e.a.) |
+| `js/widgets.js` | Widgets: klok, weer, aftellen, notitie, taken, zoeken |
 | `sw.js`, `manifest.webmanifest`, `icons/` | PWA |
 | `vendor/` | `supabase-js` 2.49.4 en SortableJS 1.15.6 (lokaal, geen CDN nodig) |
 | `supabase/schema.sql` | Tabellen, RLS-beleid en functies |

@@ -40,6 +40,13 @@ create table if not exists public.cards (
 );
 create index if not exists cards_page_idx on public.cards (page_id);
 
+-- Widgets: een card is standaard een lijst met links; andere types zijn widgets.
+-- (Los uitvoerbaar op bestaande databases: supabase/migrations/002_widgets.sql)
+alter table public.cards
+  add column if not exists type text not null default 'links'
+    check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search')),
+  add column if not exists config jsonb not null default '{}'::jsonb;
+
 -- card_id = null betekent: staat in de inbox ("Nieuw")
 create table if not exists public.bookmarks (
   id         uuid primary key default gen_random_uuid(),
