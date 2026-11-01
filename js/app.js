@@ -2,6 +2,7 @@ import * as api from './api.js';
 import { h, icon, showMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
 import { WIDGETS } from './widgets.js';
+import { parseYouTube, thumbUrl, embedUrl, fetchOEmbed } from './videos.js';
 
 const VIEWS = [
   { value: 'list', label: 'Lijst' },
@@ -11,7 +12,7 @@ const VIEWS = [
 ];
 const MAX_COLUMNS = 6;
 
-const state = { pages: [], cards: [], bookmarks: [], settings: null, email: '', loaded: false };
+const state = { pages: [], cards: [], bookmarks: [], videos: null, settings: null, email: '', loaded: false };
 const $root = document.getElementById('app');
 
 let sortables = [];
@@ -182,6 +183,7 @@ async function reload() {
 function currentRoute() {
   const hash = location.hash.replace(/^#\/?/, '');
   if (hash === 'instellingen') return { name: 'settings' };
+  if (hash === 'videos') return { name: 'videos' };
   const m = hash.match(/^p\/([\w-]+)/);
   let page = m && pageById(m[1]);
   if (!page) page = pageById(prefs.get('lastPage')) || userPages()[0] || inboxPage();
@@ -689,7 +691,13 @@ function renderHeader() {
     'div',
     { class: 'tabs-scroll' },
     inbox ? tabEl(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
-    inbox && pages.length ? h('span', { class: 'tab-sep', 'aria-hidden': 'true' }) : null,
+    h(
+      'a',
+      { class: `tab${route.name === 'videos' ? ' active' : ''}`, href: '#/videos', 'aria-current': route.name === 'videos' ? 'page' : null },
+      icon('video', 16),
+      h('span', { class: 'tab-label' }, "Video's"),
+    ),
+    pages.length ? h('span', { class: 'tab-sep', 'aria-hidden': 'true' }) : null,
     list,
     pages.length ? null : h('span', { class: 'tabs-hint' }, "Maak je eerste pagina met de +"),
   );
@@ -774,12 +782,14 @@ function renderMain() {
   const route = currentRoute();
   let view;
   if (route.name === 'settings') view = settingsView();
+  else if (route.name === 'videos') view = videosView();
   else if (route.page?.is_inbox) view = inboxView(route.page);
   else if (route.page) view = boardView(route.page);
   else view = h('div', { class: 'empty' }, 'Geen pagina gevonden.');
   if (route.page) prefs.set('lastPage', route.page.id);
   main.replaceChildren(view);
-  document.title = route.name === 'settings' ? 'Instellingen · Bookmarks' : `${route.page?.title ?? 'Bookmarks'} · Bookmarks`;
+  const names = { settings: 'Instellingen', videos: "Video's" };
+  document.title = `${names[route.name] ?? route.page?.title ?? 'Bookmarks'} · Bookmarks`;
 }
 
 function topbar({ title, page, controls }) {
@@ -1158,6 +1168,314 @@ async function logout() {
   await api.signOut();
 }
 
+// ---- Video's ------------------------------------------------------------------------------------------------------------
+
+const videoFilter = { kind: prefs.get('videoKind', 'all'), status: prefs.get('videoStatus', 'all') };
+const enrichTried = new Set();
+
+const videosByNewest = () => [...(state.videos ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+
+function filteredVideos() {
+  return videosByNewest().filter(
+    (v) => (videoFilter.kind === 'all' || v.kind === videoFilter.kind) && (videoFilter.status === 'all' || (videoFilter.status === 'watched') === !!v.watched),
+  );
+}
+
+function videoTile(v, group) {
+  const tile = h(
+    'div',
+    { class: `vtile ${v.kind}${v.watched ? ' watched' : ''}`, dataset: { id: v.id } },
+    h(
+      'button',
+      { class: 'vtile-main', type: 'button', 'aria-label': `Afspelen: ${v.title}`, onclick: () => openPlayer(group, group.indexOf(v)) },
+      h(
+        'span',
+        { class: 'vthumb' },
+        h('img', { src: thumbUrl(v.video_id), alt: '', loading: 'lazy', draggable: 'false' }),
+        h('span', { class: 'vplay' }, icon('play', 22)),
+        v.watched ? h('span', { class: 'vseen', title: 'Bekeken' }, icon('check', 14)) : null,
+      ),
+      h('span', { class: 'vtitle' }, v.title),
+      v.channel ? h('span', { class: 'vchannel' }, v.channel) : null,
+    ),
+    h('button', { class: 'icon-btn vmenu', type: 'button', 'aria-label': `Opties voor ${v.title}`, onclick: (e) => videoMenu(v, e.currentTarget) }, icon('dots', 16)),
+  );
+  tile.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    videoMenu(v, { x: e.clientX, y: e.clientY });
+  });
+  return tile;
+}
+
+function videoMenu(v, anchor) {
+  const group = videosByNewest().filter((x) => x.kind === v.kind);
+  showMenu(anchor, [
+    { label: 'Afspelen', icon: 'play', onClick: () => openPlayer(group, group.indexOf(v)) },
+    { label: 'Openen op YouTube', icon: 'video', onClick: () => window.open(v.url, '_blank', 'noopener') },
+    { label: v.watched ? 'Markeren als niet bekeken' : 'Markeren als bekeken', icon: 'check', onClick: () => toggleWatched(v) },
+    '-',
+    { label: 'Titel wijzigen', icon: 'pencil', onClick: () => editVideo(v) },
+    { label: 'Adres kopiëren', icon: 'copy', onClick: () => copyText(v.url, 'Adres gekopieerd') },
+    '-',
+    { label: 'Verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideo(v) },
+  ]);
+}
+
+function toggleWatched(v) {
+  v.watched = !v.watched;
+  persist(api.patchVideo(v.id, { watched: v.watched }));
+  if (currentRoute().name === 'videos' && !document.querySelector('dialog[open]')) renderMain();
+}
+
+async function editVideo(v) {
+  const r = await openDialog('Titel wijzigen', fieldsBody([{ name: 'title', label: 'Titel', value: v.title, required: true, maxlength: 300 }]));
+  if (!r) return;
+  v.title = r.title;
+  renderMain();
+  persist(api.patchVideo(v.id, { title: v.title }));
+}
+
+async function deleteVideo(v) {
+  state.videos = state.videos.filter((x) => x !== v);
+  renderMain();
+  try {
+    await api.removeVideo(v.id);
+  } catch (err) {
+    state.videos.push(v);
+    renderMain();
+    toast(`Verwijderen mislukt: ${err.message}`, { error: true });
+    return;
+  }
+  toast('Video verwijderd', {
+    action: {
+      label: 'Ongedaan maken',
+      onClick: async () => {
+        try {
+          const { id, video_id, kind, url, title, channel, watched, created_at } = v;
+          state.videos.push(await api.insertVideo({ id, video_id, kind, url, title, channel, watched, created_at }));
+          renderMain();
+        } catch (err) {
+          toast(`Terugzetten mislukt: ${err.message}`, { error: true });
+        }
+      },
+    },
+  });
+}
+
+async function addVideo() {
+  const r = await openDialog(
+    'Video toevoegen',
+    fieldsBody([
+      {
+        name: 'url',
+        label: 'YouTube-adres',
+        required: true,
+        placeholder: 'https://www.youtube.com/shorts/…',
+        inputmode: 'url',
+        validate: (v) => (parseYouTube(v) ? null : 'Dit is geen YouTube-video of Short.'),
+      },
+    ]),
+    { submit: 'Toevoegen' },
+  );
+  if (!r) return;
+  const p = parseYouTube(r.url);
+  if (state.videos.some((v) => v.video_id === p.id)) {
+    toast('Deze video staat er al in.');
+    return;
+  }
+  const info = await fetchOEmbed(p.id);
+  try {
+    const row = await api.insertVideo({
+      video_id: p.id,
+      kind: info?.portrait ? 'short' : p.kind,
+      url: p.url,
+      title: info?.title || 'YouTube-video',
+      channel: info?.channel ?? null,
+    });
+    state.videos.push(row);
+    renderAll();
+    toast('Video toegevoegd');
+  } catch (err) {
+    toast(`Toevoegen mislukt: ${err.message}`, { error: true });
+  }
+}
+
+// Haalt kanaalnaam (en zo nodig titel/type) op bij YouTube voor video's die de extensie zonder die gegevens opsloeg.
+async function enrichVideos() {
+  const queue = (state.videos ?? []).filter((v) => !v.channel && !enrichTried.has(v.id));
+  if (!queue.length) return;
+  queue.forEach((v) => enrichTried.add(v.id));
+  let changed = false;
+  const worker = async () => {
+    for (let v = queue.shift(); v; v = queue.shift()) {
+      const info = await fetchOEmbed(v.video_id);
+      if (!info) continue;
+      const patch = { channel: info.channel };
+      if (info.title && (!v.title || v.title === 'YouTube-video')) patch.title = info.title;
+      if (info.portrait && v.kind === 'video') patch.kind = 'short';
+      Object.assign(v, patch);
+      changed = true;
+      api.patchVideo(v.id, patch).catch(() => {});
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  if (changed && currentRoute().name === 'videos' && !document.querySelector('dialog[open]') && !isTyping()) renderMain();
+}
+
+function videosView() {
+  const controls = state.videos
+    ? h('button', { class: 'btn primary', type: 'button', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video'))
+    : null;
+  const wrap = h('div', { class: 'view' }, topbar({ title: "Video's", controls }));
+
+  if (state.videos === null) {
+    wrap.append(
+      h(
+        'div',
+        { class: 'empty' },
+        h('div', { class: 'empty-art' }, icon('video', 36)),
+        h('h2', {}, 'De video-tabel ontbreekt nog'),
+        h('p', {}, 'Voer supabase/migrations/003_videos.sql uit in de Supabase SQL Editor en ververs deze pagina.'),
+      ),
+    );
+    return wrap;
+  }
+  if (!state.videos.length) {
+    wrap.append(
+      h(
+        'div',
+        { class: 'empty' },
+        h('div', { class: 'empty-art' }, icon('video', 36)),
+        h('h2', {}, 'Nog geen video’s'),
+        h('p', {}, 'Sla een YouTube-video of Short op met de video-knop in de extensie, of plak hieronder een adres.'),
+        h('button', { class: 'btn primary', type: 'button', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video toevoegen')),
+      ),
+    );
+    return wrap;
+  }
+
+  const list = filteredVideos();
+  const shorts = list.filter((v) => v.kind === 'short');
+  const videos = list.filter((v) => v.kind === 'video');
+  const filters = h(
+    'div',
+    { class: 'vfilters' },
+    segmented([{ value: 'all', label: 'Alles' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
+      videoFilter.kind = value;
+      prefs.set('videoKind', value);
+      renderMain();
+    }),
+    segmented([{ value: 'all', label: 'Alle' }, { value: 'todo', label: 'Te kijken' }, { value: 'watched', label: 'Bekeken' }], videoFilter.status, (value) => {
+      videoFilter.status = value;
+      prefs.set('videoStatus', value);
+      renderMain();
+    }),
+    h('span', { class: 'muted vcount' }, `${list.length} van ${state.videos.length}`),
+  );
+  const body = h('div', { class: 'videos' }, filters);
+  const section = (title, group, kind) =>
+    group.length
+      ? h('section', { class: 'vsection' }, h('h2', {}, `${title} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group))))
+      : null;
+  body.append(section('Shorts', shorts, 'short'), section("Video's", videos, 'video'));
+  if (!list.length) body.append(h('p', { class: 'search-empty' }, 'Geen video’s met dit filter.'));
+  wrap.append(body);
+  enrichVideos();
+  return wrap;
+}
+
+function openPlayer(group, startIndex) {
+  if (!group.length || startIndex < 0) return;
+  let i = startIndex;
+  const dlg = h('dialog', { class: 'dialog player-dialog' });
+  const frame = h('div', { class: 'player-frame' });
+  const titleEl = h('div', { class: 'player-title' });
+  const metaEl = h('div', { class: 'player-meta' });
+  const seenBtn = h('button', { class: 'btn', type: 'button' });
+  const ytLink = h('a', { class: 'btn ghost', target: '_blank', rel: 'noopener noreferrer', title: 'Openen op YouTube', 'aria-label': 'Openen op YouTube' }, icon('video', 16), h('span', {}, 'YouTube'));
+
+  const paintInfo = () => {
+    const v = group[i];
+    dlg.dataset.kind = v.kind;
+    titleEl.textContent = v.title;
+    metaEl.textContent = [v.channel, `${i + 1} van ${group.length}`].filter(Boolean).join(' · ');
+    seenBtn.replaceChildren(icon('check', 16), h('span', {}, v.watched ? 'Bekeken' : 'Markeer als bekeken'));
+    seenBtn.classList.toggle('on', !!v.watched);
+    const label = v.watched ? 'Bekeken (klik om te wissen)' : 'Markeer als bekeken';
+    seenBtn.title = label;
+    seenBtn.setAttribute('aria-label', label);
+    ytLink.href = v.url;
+  };
+  const show = (n) => {
+    i = (n + group.length) % group.length;
+    const v = group[i];
+    frame.replaceChildren(
+      h('iframe', {
+        src: embedUrl(v.video_id),
+        title: v.title,
+        allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen; web-share',
+        allowfullscreen: true,
+        referrerpolicy: 'strict-origin-when-cross-origin',
+      }),
+    );
+    paintInfo();
+  };
+  seenBtn.addEventListener('click', () => {
+    const v = group[i];
+    v.watched = !v.watched;
+    persist(api.patchVideo(v.id, { watched: v.watched }));
+    paintInfo();
+  });
+
+  // Eerst de iframe weghalen: de video stopt dan meteen, ook als het sluit-event pas later komt.
+  const stop = () => frame.replaceChildren();
+  const closePlayer = () => {
+    stop();
+    dlg.close();
+  };
+
+  const multiple = group.length > 1;
+  dlg.append(
+    h(
+      'div',
+      { class: 'player' },
+      h(
+        'div',
+        { class: 'player-head' },
+        h('div', { class: 'player-text' }, titleEl, metaEl),
+        iconButton('x', 'Sluiten', closePlayer),
+      ),
+      frame,
+      h(
+        'div',
+        { class: 'player-foot' },
+        multiple ? iconButton('chevron-left', 'Vorige', () => show(i - 1)) : null,
+        multiple ? iconButton('chevron-right', 'Volgende', () => show(i + 1)) : null,
+        h('div', { class: 'spacer' }),
+        seenBtn,
+        ytLink,
+      ),
+    ),
+  );
+  dlg.addEventListener('keydown', (e) => {
+    if (!multiple) return;
+    if (e.key === 'ArrowLeft') show(i - 1);
+    if (e.key === 'ArrowRight') show(i + 1);
+  });
+  dlg.addEventListener('click', (e) => {
+    if (e.target === dlg) closePlayer();
+  });
+  dlg.addEventListener('cancel', stop); // Esc
+  dlg.addEventListener('close', () => {
+    stop();
+    dlg.remove(); // verwijdert de iframe, dus de video stopt
+    if (currentRoute().name === 'videos') renderMain();
+  });
+  document.body.append(dlg);
+  dlg.showModal();
+  show(i);
+}
+
 // ---- Zoeken -----------------------------------------------------------------------------------------------------------
 
 function whereIs(b) {
@@ -1166,12 +1484,19 @@ function whereIs(b) {
   return card ? `${page?.title ?? '?'} › ${card.title}` : 'Nieuw';
 }
 
+function playFromSearch(video) {
+  setTimeout(() => {
+    const group = videosByNewest().filter((x) => x.kind === video.kind);
+    openPlayer(group, group.findIndex((x) => x.id === video.id));
+  }, 0);
+}
+
 function openSearch() {
   if (document.querySelector('dialog[open]')) return;
   openDialog(
     null,
     ({ close }) => {
-      const input = h('input', { class: 'input search-input', type: 'search', placeholder: 'Zoek in al je snelkoppelingen…', autocomplete: 'off', 'aria-label': 'Zoeken' });
+      const input = h('input', { class: 'input search-input', type: 'search', placeholder: 'Zoek in je snelkoppelingen en video’s…', autocomplete: 'off', 'aria-label': 'Zoeken' });
       const list = h('div', { class: 'search-results', role: 'listbox' });
       let results = [];
       let sel = 0;
@@ -1179,13 +1504,29 @@ function openSearch() {
       const paint = () => {
         list.replaceChildren(
           ...(results.length
-            ? results.map((b, i) =>
-                h(
-                  'a',
-                  { class: `search-hit${i === sel ? ' selected' : ''}`, role: 'option', href: safeHref(b.url), target: linkTarget(), rel: 'noopener noreferrer', onclick: () => close(true) },
-                  faviconEl(b.url),
-                  h('span', { class: 'hit-text' }, h('span', { class: 'hit-title' }, b.title), h('span', { class: 'hit-meta' }, `${whereIs(b)} · ${hostOf(b.url)}`)),
-                ),
+            ? results.map((r, i) =>
+                r.video
+                  ? h(
+                      'a',
+                      {
+                        class: `search-hit${i === sel ? ' selected' : ''}`,
+                        role: 'option',
+                        href: r.video.url,
+                        onclick: (e) => {
+                          e.preventDefault();
+                          close(true);
+                          playFromSearch(r.video);
+                        },
+                      },
+                      h('img', { class: 'hit-thumb', src: thumbUrl(r.video.video_id), alt: '', loading: 'lazy' }),
+                      h('span', { class: 'hit-text' }, h('span', { class: 'hit-title' }, r.video.title), h('span', { class: 'hit-meta' }, `Video’s · ${r.video.channel ?? 'YouTube'}`)),
+                    )
+                  : h(
+                      'a',
+                      { class: `search-hit${i === sel ? ' selected' : ''}`, role: 'option', href: safeHref(r.b.url), target: linkTarget(), rel: 'noopener noreferrer', onclick: () => close(true) },
+                      faviconEl(r.b.url),
+                      h('span', { class: 'hit-text' }, h('span', { class: 'hit-title' }, r.b.title), h('span', { class: 'hit-meta' }, `${whereIs(r.b)} · ${hostOf(r.b.url)}`)),
+                    ),
               )
             : [h('p', { class: 'search-empty' }, input.value.trim() ? 'Niets gevonden.' : 'Nog geen snelkoppelingen.')]),
         );
@@ -1194,10 +1535,11 @@ function openSearch() {
 
       const run = () => {
         const tokens = input.value.toLowerCase().split(/\s+/).filter(Boolean);
-        const all = [...state.bookmarks].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
-        results = tokens.length
-          ? all.filter((b) => tokens.every((t) => `${b.title} ${b.url}`.toLowerCase().includes(t)))
-          : all;
+        const all = [
+          ...state.bookmarks.map((b) => ({ b, text: `${b.title} ${b.url}`, at: Date.parse(b.created_at) })),
+          ...(state.videos ?? []).map((video) => ({ video, text: `${video.title} ${video.channel ?? ''} youtube video`, at: Date.parse(video.created_at) })),
+        ].sort((x, y) => y.at - x.at);
+        results = tokens.length ? all.filter((r) => tokens.every((t) => r.text.toLowerCase().includes(t))) : all;
         results = results.slice(0, 40);
         sel = 0;
         paint();
@@ -1218,7 +1560,8 @@ function openSearch() {
         focus: () => input,
         collect() {
           const hit = results[sel];
-          if (hit) window.open(safeHref(hit.url), linkTarget(), 'noopener');
+          if (hit?.video) playFromSearch(hit.video);
+          else if (hit) window.open(safeHref(hit.b.url), linkTarget(), 'noopener');
           return true;
         },
       };
@@ -1349,6 +1692,14 @@ function onRemoteBookmark(row) {
   toast(`Nieuw in inbox: ${row.title}`);
 }
 
+function onRemoteVideo(row) {
+  if (!state.videos || state.videos.some((v) => v.id === row.id)) return;
+  state.videos.push(row);
+  renderHeader();
+  if (currentRoute().name === 'videos' && !document.querySelector('dialog[open]')) renderMain();
+  toast(`Nieuwe video: ${row.title}`);
+}
+
 // ---- Start ------------------------------------------------------------------------------------------------------------------------------
 
 async function startApp() {
@@ -1366,7 +1717,9 @@ async function startApp() {
   buildShell();
   renderAll();
   unsubscribe?.();
-  unsubscribe = api.subscribeBookmarks(onRemoteBookmark);
+  const unsubs = [api.subscribeBookmarks(onRemoteBookmark)];
+  if (state.videos) unsubs.push(api.subscribeVideos(onRemoteVideo));
+  unsubscribe = () => unsubs.forEach((fn) => fn());
   handleShareTarget();
 }
 
@@ -1375,7 +1728,7 @@ function teardown() {
   unsubscribe = null;
   destroySortables();
   navSortable?.destroy();
-  Object.assign(state, { pages: [], cards: [], bookmarks: [], settings: null, email: '', loaded: false });
+  Object.assign(state, { pages: [], cards: [], bookmarks: [], videos: null, settings: null, email: '', loaded: false });
   renderLogin();
 }
 

@@ -8,6 +8,7 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
 - Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube). Ze slepen, hernoemen en verwijderen net als andere cards
+- Pagina **Video's** voor YouTube Shorts en video's: rooster met voorbeeldplaatjes, afspelen in de site (met vorige/volgende), filter op Shorts/Video's en Te kijken/Bekeken, handmatig toevoegen, en ze komen mee in het zoeken. De extensie slaat ze op met een eigen knop. Sommige video's staan embedden niet toe (keuze van de eigenaar); daarvoor is er de knop "Openen op YouTube"
 - Vaste pagina **Nieuw**: hier komen links binnen die je via de browserextensie opslaat; met één klik verplaats je ze naar de juiste pagina en card
 - Zoeken door al je links (`/` of `Ctrl+K`), realtime updates vanuit de extensie
 - Zes thema's: **Licht**, **Donker**, **Neon**, **Oceaan**, **Bos** en **Zonsondergang**, of **Automatisch** (volgt je systeem). Kies via Instellingen of het paletje rechtsboven in de header; de keuze geldt per apparaat
@@ -41,6 +42,10 @@ Lokaal testen kan met een willekeurige statische server, bijvoorbeeld `python -m
 ### Bestaande installatie bijwerken (widgets)
 
 Heb je het schema al eerder uitgevoerd? Draai dan eenmalig [`supabase/migrations/002_widgets.sql`](supabase/migrations/002_widgets.sql) in de SQL Editor. Zonder deze stap werken je bestaande cards gewoon door, maar kun je geen widgets toevoegen. Het weer haalt gegevens op bij Open-Meteo; daarvoor wordt alleen de plaatsnaam en locatie van je widget gedeeld.
+
+### Video's activeren
+
+Voer eenmalig [`supabase/migrations/003_videos.sql`](supabase/migrations/003_videos.sql) uit in de SQL Editor. Zonder dit bestand werkt de rest van de site gewoon en toont de pagina Video's een melding. Titel en kanaalnaam haalt de site zelf op bij YouTube (oEmbed, geen sleutel nodig); de speler gebruikt de officiële ingesloten YouTube-speler. Er wordt geen video gedownload of opgeslagen, alleen het adres, de titel en de kanaalnaam.
 
 ## Extensie koppelen
 
@@ -77,6 +82,17 @@ async function saveCurrentTab() {
 
 Lekt je sleutel? Klik in Instellingen op **Nieuwe sleutel**; de oude werkt dan direct niet meer.
 
+### Video's opslaan
+
+Dezelfde sleutel en headers, maar een andere functie, die alleen YouTube-adressen accepteert (`youtube.com/shorts/…`, `watch?v=…`, `youtu.be/…`, `/live/`, `/embed/`):
+
+```
+POST https://smufazdrxboqdyosxyiv.supabase.co/rest/v1/rpc/add_video
+{ "p_key": "<jouw API-sleutel>", "p_url": "https://www.youtube.com/shorts/…", "p_title": "Titel - YouTube" }
+```
+
+Antwoord: `{ "ok": true, "id": "…", "duplicate": false, "kind": "short" }`. Een video die er al in staat geeft `duplicate: true`. Een ander adres geeft de fout `geen YouTube-video`. Het achtervoegsel " - YouTube" van een tabtitel wordt automatisch verwijderd.
+
 ## Importeren uit start.me
 
 1. Exporteer in start.me via **Export → Export bookmarks** (HTML-bestand).
@@ -95,6 +111,7 @@ Start.me bewaart geen kolompositie van widgets, dus de cards worden evenwichtig 
 | `js/ui.js` | Menu's, dialogen, toasts, iconen |
 | `js/importer.js` | Parser voor bladwijzer-HTML (start.me e.a.) |
 | `js/widgets.js` | Widgets: klok, weer, aftellen, notitie, taken, zoeken |
+| `js/videos.js` | YouTube-adressen herkennen, plaatjes, speler-adres, oEmbed |
 | `sw.js`, `manifest.webmanifest`, `icons/` | PWA |
 | `vendor/` | `supabase-js` 2.49.4 en SortableJS 1.15.6 (lokaal, geen CDN nodig) |
 | `supabase/schema.sql` | Tabellen, RLS-beleid en functies |

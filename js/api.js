@@ -64,13 +64,15 @@ async function fetchAll(table) {
 }
 
 export async function loadAll() {
-  const [pages, cards, bookmarks, settings] = await Promise.all([
+  const [pages, cards, bookmarks, settings, videos] = await Promise.all([
     fetchAll('pages'),
     fetchAll('cards'),
     fetchAll('bookmarks'),
     sb.from('user_settings').select('api_key').maybeSingle().then(check),
+    // null = tabel bestaat nog niet (003_videos.sql niet uitgevoerd); de rest van de app werkt dan gewoon
+    fetchAll('videos').catch(() => null),
   ]);
-  return { pages, cards, bookmarks, settings };
+  return { pages, cards, bookmarks, settings, videos };
 }
 
 export async function currentEmail() {
@@ -102,6 +104,10 @@ export const insertBookmark = (row) => insert('bookmarks', row);
 export const patchBookmark = (id, v) => patch('bookmarks', id, v);
 export const removeBookmark = (id) => remove('bookmarks', id);
 
+export const insertVideo = (row) => insert('videos', row);
+export const patchVideo = (id, v) => patch('videos', id, v);
+export const removeVideo = (id) => remove('videos', id);
+
 // rows: [{ id, ...velden }]
 export async function patchMany(table, rows) {
   await Promise.all(
@@ -111,12 +117,13 @@ export async function patchMany(table, rows) {
 
 // ---- Realtime ------------------------------------------------------------
 
-export function subscribeBookmarks(onInsert) {
+function subscribeInserts(table, onInsert) {
   const channel = sb
-    .channel('bookmarks-inserts')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bookmarks' }, (p) =>
-      onInsert(p.new),
-    )
+    .channel(`${table}-inserts`)
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table }, (p) => onInsert(p.new))
     .subscribe();
   return () => sb.removeChannel(channel);
 }
+
+export const subscribeBookmarks = (onInsert) => subscribeInserts('bookmarks', onInsert);
+export const subscribeVideos = (onInsert) => subscribeInserts('videos', onInsert);

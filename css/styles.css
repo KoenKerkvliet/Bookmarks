@@ -1270,6 +1270,274 @@ body.dragging .column {
   color: var(--text-2);
 }
 
+/* ---- Video's ------------------------------------------------------------------------- */
+.videos {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 8px 20px 40px;
+}
+
+.vfilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.vcount {
+  margin-left: auto;
+  font-size: 13px;
+}
+
+.vsection h2 {
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.vgrid {
+  display: grid;
+  gap: 16px 14px;
+}
+
+.vgrid.short {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+
+.vgrid.video {
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+}
+
+.vtile {
+  position: relative;
+  min-width: 0;
+}
+
+.vtile-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  text-align: left;
+}
+
+.vthumb {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  aspect-ratio: 16 / 9;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.vtile.short .vthumb {
+  aspect-ratio: 9 / 16;
+}
+
+.vtile-main:hover .vthumb,
+.vtile-main:focus-visible .vthumb {
+  border-color: var(--card-hover, var(--primary));
+  box-shadow: var(--glow);
+}
+
+.vthumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vplay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgb(0 0 0 / 0.38);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.vplay svg {
+  fill: currentColor;
+  width: 34px;
+  height: 34px;
+}
+
+.vtile-main:hover .vplay,
+.vtile-main:focus-visible .vplay {
+  opacity: 1;
+}
+
+.vtitle {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.vchannel {
+  overflow: hidden;
+  font-size: 12.5px;
+  color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vtile.watched .vthumb img {
+  opacity: 0.4;
+}
+
+.vtile.watched .vtitle {
+  color: var(--text-2);
+}
+
+.vseen {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--on-primary);
+  background: var(--primary);
+  border-radius: 50%;
+}
+
+.vtile .vmenu {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 28px;
+  height: 28px;
+  color: #fff;
+  background: rgb(0 0 0 / 0.55);
+  opacity: 0;
+}
+
+.vtile:hover .vmenu,
+.vtile .vmenu:focus-visible {
+  opacity: 1;
+}
+
+.vtile .vmenu:hover:not(:disabled) {
+  color: #fff;
+  background: rgb(0 0 0 / 0.78);
+}
+
+@media (hover: none) {
+  .vtile .vmenu {
+    opacity: 1;
+  }
+}
+
+.player-dialog {
+  width: min(920px, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+
+.player-dialog[data-kind='short'] {
+  width: min(440px, calc(100vw - 24px));
+}
+
+.player {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.player-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.player-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.player-title {
+  font-weight: 650;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.player-meta {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.player-frame {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: #000;
+  border-radius: var(--radius-sm);
+}
+
+.player-dialog[data-kind='short'] .player-frame {
+  width: min(100%, calc((100dvh - 200px) * 9 / 16));
+  aspect-ratio: 9 / 16;
+  margin-inline: auto;
+}
+
+.player-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.player-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn.on {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+}
+
+@media (max-width: 560px) {
+  .player-foot .btn {
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
+  .player-foot .btn span:not(.icon) {
+    display: none;
+  }
+}
+
+.hit-thumb {
+  flex: none;
+  width: 44px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: 5px;
+}
+
 /* ---- Inbox ------------------------------------------------------------------------- */
 .inbox {
   width: min(820px, 100%);
@@ -1845,6 +2113,7 @@ summary {
 
   .board,
   .inbox,
+  .videos,
   .settings {
     padding-left: 12px;
     padding-right: 12px;

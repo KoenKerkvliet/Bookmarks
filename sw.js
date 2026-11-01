@@ -12,6 +12,7 @@ const SHELL = [
   'js/config.js',
   'js/importer.js',
   'js/widgets.js',
+  'js/videos.js',
   'vendor/supabase.js',
   'vendor/Sortable.min.js',
   'favicon.ico',
