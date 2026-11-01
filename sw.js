@@ -1,6 +1,6 @@
 // Network-first: altijd de nieuwste bestanden, met cache als terugval (offline starten).
 // Supabase-verzoeken (andere origin) worden nooit gecachet.
-const CACHE = 'bookmarks-v1';
+const CACHE = 'bookmarks-v2';
 const SHELL = [
   './',
   'index.html',
@@ -14,7 +14,8 @@ const SHELL = [
   'js/widgets.js',
   'vendor/supabase.js',
   'vendor/Sortable.min.js',
-  'icons/icon.svg',
+  'favicon.ico',
+  'icons/favicon-32.png',
   'icons/icon-192.png',
 ];
 
