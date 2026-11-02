@@ -481,15 +481,11 @@ a {
   gap: 10px;
 }
 
-.brand-mark {
-  display: grid;
-  place-items: center;
+.brand-logo {
+  display: block;
   width: 32px;
   height: 32px;
-  border-radius: 9px;
-  background: var(--brand-bg);
-  color: var(--on-primary);
-  box-shadow: var(--glow);
+  border-radius: 8px;
 }
 
 .brand-name {
@@ -497,46 +493,11 @@ a {
   font-size: 17px;
 }
 
-.tabs {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.tabs-scroll {
+.header-nav {
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  padding: 4px 2px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.tabs-scroll::-webkit-scrollbar {
-  display: none;
-}
-
-.tabs-scroll.fade-end {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
-}
-
-.tabs-scroll.fade-start {
-  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
-}
-
-.tabs-scroll.fade-start.fade-end {
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
-  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
-}
-
-.tabs-list {
-  display: flex;
-  gap: 4px;
 }
 
 .tab {
@@ -546,6 +507,8 @@ a {
   gap: 8px;
   height: 36px;
   padding: 0 12px;
+  background: transparent;
+  border: 0;
   border-radius: var(--radius-sm);
   color: var(--text-2);
   font-weight: 500;
@@ -565,28 +528,99 @@ a {
 }
 
 .tab-label {
-  max-width: 200px;
+  min-width: 0;
+  max-width: 240px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.tab-sep {
-  flex: none;
-  width: 1px;
-  height: 20px;
-  margin: 0 6px;
-  background: var(--border);
+.pages-btn {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
-.tabs-hint {
-  padding: 0 8px;
-  font-size: 13px;
-  color: var(--text-2);
+.pages-btn .icon:last-child {
+  opacity: 0.7;
+}
+
+/* Pagina-dropdown */
+.pages-menu {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  width: min(300px, calc(100vw - 16px));
+  max-height: min(72vh, 520px);
+  padding: 6px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.pm-filter {
+  flex: none;
+  height: 36px;
+  margin-bottom: 6px;
+}
+
+.pm-list {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.pm-item,
+.pm-add {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  text-align: left;
+}
+
+.pm-item:hover,
+.pm-add:hover,
+.pm-item:focus-visible,
+.pm-add:focus-visible {
+  background: var(--surface-2);
+  outline: none;
+}
+
+.pm-item.active {
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.pm-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.add-tab {
-  flex: none;
+.pm-add {
+  color: var(--primary-strong);
+  font-weight: 600;
+}
+
+.pm-empty {
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--text-2);
 }
 
 .header-actions {
@@ -2029,15 +2063,11 @@ summary {
   box-shadow: var(--shadow);
 }
 
-.auth-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
+.auth-logo {
+  display: block;
+  width: 56px;
+  height: 56px;
   border-radius: 14px;
-  background: var(--brand-bg);
-  color: var(--on-primary);
-  box-shadow: var(--glow);
 }
 
 .auth-card h1 {
@@ -2055,13 +2085,11 @@ summary {
   }
 }
 
-@media (min-width: 761px) and (max-width: 900px) {
+@media (max-width: 900px) {
   .brand-name {
     display: none;
   }
-}
 
-@media (max-width: 900px) {
   .search-text,
   .search-btn kbd {
     display: none;
@@ -2075,27 +2103,9 @@ summary {
 }
 
 @media (max-width: 760px) {
-  /* Header in twee rijen: logo + acties, daaronder de pagina-tabs */
   .header {
-    flex-wrap: wrap;
-    gap: 2px 8px;
-    height: auto;
-    padding: 8px 12px 0;
-  }
-
-  .brand {
-    order: 1;
-  }
-
-  .header-actions {
-    order: 2;
-    margin-left: auto;
-  }
-
-  .tabs {
-    order: 3;
-    flex: 1 0 100%;
-    padding-bottom: 4px;
+    gap: 6px;
+    padding: 0 10px;
   }
 
   .topbar {
@@ -2143,6 +2153,16 @@ summary {
 
   .row .label {
     width: 100%;
+  }
+}
+
+@media (max-width: 440px) {
+  .header-nav a.tab .tab-label {
+    display: none;
+  }
+
+  .header-nav a.tab {
+    padding: 0 10px;
   }
 }
 

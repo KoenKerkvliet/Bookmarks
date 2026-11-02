@@ -54,6 +54,7 @@ const ICONS = {
   'chevron-left': '<path d="m15 6-6 6 6 6"/>',
   'chevron-right': '<path d="m9 6 6 6-6 6"/>',
   palette: '<circle cx="13.5" cy="6.5" r="1"/><circle cx="17.5" cy="10.5" r="1"/><circle cx="8.5" cy="7.5" r="1"/><circle cx="6.5" cy="12.5" r="1"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.9 0 1.5-.7 1.5-1.5 0-.4-.2-.8-.4-1-.3-.3-.5-.6-.5-1 0-.8.7-1.5 1.5-1.5H16c3.3 0 6-2.7 6-6 0-4.9-4.5-9-10-9Z"/>',
+  'chevron-down': '<path d="m6 9 6 6 6-6"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   cloud: '<path d="M17.5 19a4.5 4.5 0 1 0-1.4-8.8A6 6 0 0 0 4.5 12.5 3.5 3.5 0 0 0 7 19Z"/>',
   hourglass: '<path d="M6 2h12M6 22h12"/><path d="M7 2v4a5 5 0 0 0 2 4l3 2-3 2a5 5 0 0 0-2 4v4"/><path d="M17 2v4a5 5 0 0 1-2 4l-3 2 3 2a5 5 0 0 1 2 4v4"/>',
@@ -69,20 +70,69 @@ export function icon(name, size = 18) {
   return span;
 }
 
-// ---- Contextmenu -----------------------------------------------------------
+// ---- Popover en contextmenu ------------------------------------------------
 
 let activeMenu = null;
 
 export function closeMenu() {
   if (!activeMenu) return;
-  activeMenu.cleanup();
-  activeMenu.el.remove();
+  const { cleanup, el, onClose } = activeMenu;
   activeMenu = null;
+  cleanup();
+  el.remove();
+  onClose?.();
+}
+
+// Toont `el` als zwevend paneel onder `anchor` (element of { x, y }) en sluit het bij klik
+// erbuiten, Esc, resize of scrollen van de pagina. Scrollen binnen het paneel sluit het niet.
+// alignLeft: lijn het paneel uit op de linkerkant van het element (standaard: rechterkant).
+export function showPopover(anchor, el, { alignLeft = false, onClose } = {}) {
+  closeMenu();
+  document.body.append(el);
+
+  const isEl = anchor instanceof Element;
+  const rect = isEl ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
+  const mw = el.offsetWidth;
+  const mh = el.offsetHeight;
+  let left = isEl && !alignLeft ? rect.right - mw : rect.left;
+  let top = rect.bottom + 4;
+  if (left + mw > innerWidth - 8) left = innerWidth - mw - 8;
+  if (left < 8) left = 8;
+  if (top + mh > innerHeight - 8) top = Math.max(8, rect.top - mh - 4);
+  el.style.left = `${left}px`;
+  el.style.top = `${top}px`;
+
+  const onOutside = (e) => {
+    if (!el.contains(e.target)) closeMenu();
+  };
+  const onKey = (e) => {
+    if (e.key === 'Escape') closeMenu();
+  };
+  const onScroll = (e) => {
+    if (!(e?.target instanceof Node) || !el.contains(e.target)) closeMenu();
+  };
+  setTimeout(() => {
+    if (activeMenu?.el !== el) return;
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('keydown', onKey);
+    addEventListener('resize', onScroll);
+    addEventListener('scroll', onScroll, true);
+  }, 0);
+  activeMenu = {
+    el,
+    onClose,
+    cleanup() {
+      document.removeEventListener('pointerdown', onOutside, true);
+      document.removeEventListener('keydown', onKey);
+      removeEventListener('resize', onScroll);
+      removeEventListener('scroll', onScroll, true);
+    },
+  };
+  return el;
 }
 
 // anchor: element of { x, y }. items: { label, icon, checked, danger, onClick } | '-'
 export function showMenu(anchor, items) {
-  closeMenu();
   const menu = h(
     'div',
     { class: 'menu', role: 'menu' },
@@ -106,41 +156,7 @@ export function showMenu(anchor, items) {
           ),
     ),
   );
-  document.body.append(menu);
-
-  const rect = anchor instanceof Element ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
-  const mw = menu.offsetWidth;
-  const mh = menu.offsetHeight;
-  let left = anchor instanceof Element ? rect.right - mw : rect.left;
-  let top = rect.bottom + 4;
-  if (left + mw > innerWidth - 8) left = innerWidth - mw - 8;
-  if (left < 8) left = 8;
-  if (top + mh > innerHeight - 8) top = Math.max(8, rect.top - mh - 4);
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
-
-  const onOutside = (e) => {
-    if (!menu.contains(e.target)) closeMenu();
-  };
-  const onKey = (e) => {
-    if (e.key === 'Escape') closeMenu();
-  };
-  const onScroll = () => closeMenu();
-  setTimeout(() => {
-    document.addEventListener('pointerdown', onOutside, true);
-    document.addEventListener('keydown', onKey);
-    addEventListener('resize', onScroll);
-    addEventListener('scroll', onScroll, true);
-  }, 0);
-  activeMenu = {
-    el: menu,
-    cleanup() {
-      document.removeEventListener('pointerdown', onOutside, true);
-      document.removeEventListener('keydown', onKey);
-      removeEventListener('resize', onScroll);
-      removeEventListener('scroll', onScroll, true);
-    },
-  };
+  showPopover(anchor, menu);
   menu.querySelector('.menu-item')?.focus({ preventScroll: true });
 }
 

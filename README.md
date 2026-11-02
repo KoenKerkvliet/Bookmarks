@@ -4,7 +4,7 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 
 **Functies**
 
-- Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's als tabs in een header bovenin, te herschikken door te slepen
+- Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's kies je in een dropdown linksboven in de header (met Nieuw erin, zoeken bij veel pagina's, en herschikken door te slepen)
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
 - Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube). Ze slepen, hernoemen en verwijderen net als andere cards

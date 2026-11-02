@@ -1,5 +1,5 @@
 import * as api from './api.js';
-import { h, icon, showMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
+import { h, icon, showMenu, showPopover, closeMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
 import { WIDGETS } from './widgets.js';
 import { parseYouTube, thumbUrl, embedUrl, fetchOEmbed } from './videos.js';
@@ -665,90 +665,79 @@ function renderAll() {
   renderMain();
 }
 
-function tabEl(page, route, extra) {
+function pageItem(page, route, extra) {
   const active = route.name === 'page' && route.page?.id === page.id;
   return h(
     'a',
-    { class: `tab${active ? ' active' : ''}`, href: `#/p/${page.id}`, dataset: { id: page.id }, 'aria-current': active ? 'page' : null },
+    { class: `pm-item${active ? ' active' : ''}`, href: `#/p/${page.id}`, dataset: { id: page.id }, role: 'menuitem', 'aria-current': active ? 'page' : null, onclick: closeMenu },
     icon(page.is_inbox ? 'inbox' : 'page', 16),
-    h('span', { class: 'tab-label' }, page.title),
+    h('span', { class: 'pm-label' }, page.title),
     extra,
   );
 }
 
-function renderHeader() {
-  const el = document.getElementById('header');
-  if (!el) return;
-  navSortable?.destroy();
-  const previousScroll = el.querySelector('.tabs-scroll')?.scrollLeft ?? 0;
+let pagesMenuClosedAt = 0;
+
+function openPagesMenu(anchor) {
   const route = currentRoute();
   const inbox = inboxPage();
   const count = inboxLinks().length;
   const pages = userPages();
 
-  const list = h('nav', { class: 'tabs-list', 'aria-label': "Pagina's" }, pages.map((p) => tabEl(p, route)));
-  const scroller = h(
+  const list = h('div', { class: 'pm-list' }, pages.map((p) => pageItem(p, route)));
+  const filter =
+    pages.length >= 8
+      ? h('input', {
+          class: 'input pm-filter',
+          type: 'search',
+          placeholder: 'Pagina zoeken…',
+          'aria-label': 'Pagina zoeken',
+          autocomplete: 'off',
+          oninput: (e) => {
+            const q = e.target.value.trim().toLowerCase();
+            list.querySelectorAll('.pm-item').forEach((item) => {
+              item.hidden = !!q && !item.textContent.toLowerCase().includes(q);
+            });
+          },
+        })
+      : null;
+  const sep = () => h('div', { class: 'menu-sep' });
+  const menu = h(
     'div',
-    { class: 'tabs-scroll' },
-    inbox ? tabEl(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
-    h(
-      'a',
-      { class: `tab${route.name === 'videos' ? ' active' : ''}`, href: '#/videos', 'aria-current': route.name === 'videos' ? 'page' : null },
-      icon('video', 16),
-      h('span', { class: 'tab-label' }, "Video's"),
-    ),
-    pages.length ? h('span', { class: 'tab-sep', 'aria-hidden': 'true' }) : null,
+    { class: 'pages-menu', role: 'menu', 'aria-label': "Pagina's" },
+    filter,
+    inbox ? pageItem(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
+    inbox && pages.length ? sep() : null,
     list,
-    pages.length ? null : h('span', { class: 'tabs-hint' }, "Maak je eerste pagina met de +"),
+    pages.length ? null : h('p', { class: 'pm-empty' }, "Nog geen pagina's."),
+    sep(),
+    h('button', { class: 'pm-add', type: 'button', onclick: () => (closeMenu(), addPage()) }, icon('plus', 16), h('span', {}, 'Nieuwe pagina')),
   );
-
-  el.replaceChildren(
-    h('a', { class: 'brand', href: '#/', title: 'Bookmarks' }, h('span', { class: 'brand-mark' }, icon('bookmark', 18)), h('span', { class: 'brand-name' }, 'Bookmarks')),
-    h('div', { class: 'tabs' }, scroller, iconButton('plus', 'Nieuwe pagina', addPage, 'add-tab')),
-    h(
-      'div',
-      { class: 'header-actions' },
-      h('button', { class: 'search-btn', type: 'button', 'aria-label': 'Zoeken', title: 'Zoeken (/)', onclick: openSearch }, icon('search', 16), h('span', { class: 'search-text' }, 'Zoeken'), h('kbd', {}, '/')),
-      iconButton('palette', 'Thema kiezen', (e) => themeMenu(e.currentTarget)),
-      h('a', { class: `icon-btn${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen', 'aria-label': 'Instellingen', title: 'Instellingen', 'aria-current': route.name === 'settings' ? 'page' : null }, icon('settings')),
-    ),
-  );
-
-  // Horizontaal scrollen met het muiswiel, en een fade aan de rand als er meer tabs zijn.
-  const updateFade = () => {
-    const more = scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2;
-    const before = scroller.scrollLeft > 2;
-    scroller.classList.toggle('fade-end', more);
-    scroller.classList.toggle('fade-start', before);
-  };
-  scroller.addEventListener('scroll', updateFade, { passive: true });
-  scroller.addEventListener(
-    'wheel',
-    (e) => {
-      if (scroller.scrollWidth <= scroller.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
-      scroller.scrollLeft += e.deltaY;
+  menu.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    const items = [...menu.querySelectorAll('.pm-item:not([hidden]), .pm-add')];
+    const at = items.indexOf(document.activeElement);
+    const next = items[(at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+    if (next) {
       e.preventDefault();
-    },
-    { passive: false },
-  );
-  scroller.scrollLeft = previousScroll;
-  requestAnimationFrame(() => {
-    const active = scroller.querySelector('.tab.active');
-    if (active) {
-      const a = active.getBoundingClientRect();
-      const s = scroller.getBoundingClientRect();
-      if (a.left < s.left + 8) scroller.scrollLeft -= s.left + 40 - a.left;
-      else if (a.right > s.right - 8) scroller.scrollLeft += a.right - s.right + 40;
+      next.focus();
     }
-    updateFade();
   });
 
+  navSortable?.destroy();
+  showPopover(anchor, menu, {
+    alignLeft: true,
+    onClose: () => {
+      navSortable?.destroy();
+      navSortable = null;
+      pagesMenuClosedAt = performance.now();
+    },
+  });
   if (pages.length > 1) {
     navSortable = Sortable.create(list, {
       animation: 150,
       delay: 200,
       delayOnTouchOnly: true,
-      direction: 'horizontal',
       ghostClass: 'drag-ghost',
       onEnd: () => {
         const changes = [];
@@ -763,6 +752,53 @@ function renderHeader() {
       },
     });
   }
+  (filter ?? menu.querySelector('.pm-item.active') ?? menu.querySelector('.pm-item'))?.focus({ preventScroll: true });
+}
+
+function renderHeader() {
+  const el = document.getElementById('header');
+  if (!el) return;
+  const route = currentRoute();
+  const count = inboxLinks().length;
+  const onPage = route.name === 'page' && !!route.page;
+  const inInbox = onPage && route.page.is_inbox;
+
+  const pagesBtn = h(
+    'button',
+    {
+      class: `tab pages-btn${onPage ? ' active' : ''}`,
+      type: 'button',
+      'aria-haspopup': 'menu',
+      'aria-label': onPage ? `Pagina: ${route.page.title}. Pagina kiezen` : "Pagina kiezen",
+      onclick: (e) => {
+        if (performance.now() - pagesMenuClosedAt < 200) return; // klik die het menu zojuist sloot
+        openPagesMenu(e.currentTarget);
+      },
+    },
+    icon(inInbox ? 'inbox' : 'page', 16),
+    h('span', { class: 'tab-label' }, onPage ? route.page.title : "Pagina's"),
+    count && !inInbox ? h('span', { class: 'badge', title: `${count} nieuw in Nieuw` }, count > 99 ? '99+' : count) : null,
+    icon('chevron-down', 16),
+  );
+  const videosTab = h(
+    'a',
+    { class: `tab${route.name === 'videos' ? ' active' : ''}`, href: '#/videos', 'aria-current': route.name === 'videos' ? 'page' : null },
+    icon('video', 16),
+    h('span', { class: 'tab-label' }, "Video's"),
+  );
+
+  el.replaceChildren(
+    h('a', { class: 'brand', href: '#/', title: 'Bookmarks' }, h('img', { class: 'brand-logo', src: 'icons/icon-192.png', alt: '', width: 32, height: 32, draggable: 'false' }), h('span', { class: 'brand-name' }, 'Bookmarks')),
+    h('nav', { class: 'header-nav', 'aria-label': 'Navigatie' }, pagesBtn, videosTab),
+    h('div', { class: 'spacer' }),
+    h(
+      'div',
+      { class: 'header-actions' },
+      h('button', { class: 'search-btn', type: 'button', 'aria-label': 'Zoeken', title: 'Zoeken (/)', onclick: openSearch }, icon('search', 16), h('span', { class: 'search-text' }, 'Zoeken'), h('kbd', {}, '/')),
+      iconButton('palette', 'Thema kiezen', (e) => themeMenu(e.currentTarget)),
+      h('a', { class: `icon-btn${route.name === 'settings' ? ' active' : ''}`, href: '#/instellingen', 'aria-label': 'Instellingen', title: 'Instellingen', 'aria-current': route.name === 'settings' ? 'page' : null }, icon('settings')),
+    ),
+  );
 }
 
 // ---- Weergave: hoofdgebied ----------------------------------------------------------------------------------
@@ -1573,7 +1609,7 @@ function openSearch() {
 // ---- Inloggen en foutschermen ------------------------------------------------------------------------------------------------
 
 function authCard(children) {
-  return h('div', { class: 'auth' }, h('div', { class: 'auth-card' }, h('div', { class: 'auth-mark' }, icon('bookmark', 26)), children));
+  return h('div', { class: 'auth' }, h('div', { class: 'auth-card' }, h('img', { class: 'auth-logo', src: 'icons/icon-192.png', alt: '', width: 56, height: 56 }), children));
 }
 
 function renderSetupNeeded() {
