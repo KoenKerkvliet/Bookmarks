@@ -996,6 +996,45 @@ body.dragging .column {
   padding: 6px 16px 16px;
 }
 
+/* Kop: een H2 zonder kaartachtergrond, met een accentlijn eronder */
+.heading-card,
+.heading-card:hover {
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.heading-head {
+  padding: 8px 2px 6px 4px;
+  border-bottom: 2px solid var(--primary);
+}
+
+.heading-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  text-shadow: var(--text-glow);
+}
+
+.heading-card .icon-btn {
+  opacity: 0;
+}
+
+.heading-card:hover .icon-btn,
+.heading-card .icon-btn:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .heading-card .icon-btn {
+    opacity: 0.7;
+  }
+}
+
 .w-sub {
   margin-top: 4px;
   font-size: 13px;

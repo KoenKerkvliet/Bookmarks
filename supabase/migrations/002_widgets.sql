@@ -4,5 +4,5 @@
 
 alter table public.cards
   add column if not exists type text not null default 'links'
-    check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search')),
+    check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search', 'heading')),
   add column if not exists config jsonb not null default '{}'::jsonb;

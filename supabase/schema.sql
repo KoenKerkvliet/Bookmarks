@@ -44,8 +44,14 @@ create index if not exists cards_page_idx on public.cards (page_id);
 -- (Los uitvoerbaar op bestaande databases: supabase/migrations/002_widgets.sql)
 alter table public.cards
   add column if not exists type text not null default 'links'
-    check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search')),
+    check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search', 'heading')),
   add column if not exists config jsonb not null default '{}'::jsonb;
+
+-- Kop-kaarten (supabase/migrations/004_heading_cards.sql)
+alter table public.cards drop constraint if exists cards_type_check;
+alter table public.cards
+  add constraint cards_type_check
+  check (type in ('links', 'clock', 'weather', 'countdown', 'note', 'todo', 'search', 'heading'));
 
 -- card_id = null betekent: staat in de inbox ("Nieuw")
 create table if not exists public.bookmarks (

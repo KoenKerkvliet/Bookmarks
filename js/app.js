@@ -470,8 +470,9 @@ async function addCard(page) {
     title = def.title;
     fields.type = type;
     fields.config = structuredClone(def.defaults);
-    if (def.configure) {
-      const r = await def.configure(fields.config, { title });
+    const ask = def.init ?? def.configure;
+    if (ask) {
+      const r = await ask(fields.config, { title });
       if (!r) return;
       fields.config = r.config;
       title = r.title ?? r.softTitle ?? title;
@@ -485,7 +486,7 @@ async function addCard(page) {
     state.cards.push(row);
     renderMain();
   } catch (err) {
-    const hint = /type|config/i.test(err.message) ? ' (voer eerst supabase/migrations/002_widgets.sql uit)' : '';
+    const hint = /type|config/i.test(err.message) ? ' (voer eerst de nieuwste SQL uit supabase/migrations uit: 002 voor widgets, 004 voor koppen)' : '';
     toast(`Aanmaken mislukt: ${err.message}${hint}`, { error: true });
   }
 }
@@ -904,7 +905,18 @@ function boardView(page) {
   return wrap;
 }
 
+function headingCardEl(card) {
+  const title = h('h2', { class: 'heading-title', title: 'Dubbelklik om de naam te wijzigen' }, card.title);
+  title.addEventListener('dblclick', () => renameCard(card));
+  return h(
+    'article',
+    { class: 'card heading-card', dataset: { id: card.id } },
+    h('header', { class: 'card-head heading-head' }, title, iconButton('dots', 'Kop-opties', (e) => cardMenu(card, e.currentTarget), 'small')),
+  );
+}
+
 function widgetCardEl(card) {
+  if (card.type === 'heading') return headingCardEl(card);
   const def = WIDGETS[card.type];
   const body = h('div', { class: `widget-body widget-${card.type}` });
   if (def) {

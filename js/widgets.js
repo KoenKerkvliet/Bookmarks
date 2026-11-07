@@ -511,4 +511,25 @@ const search = {
   },
 };
 
-export const WIDGETS = { clock, weather, countdown, note, todo, search };
+// ---- Kop ------------------------------------------------------------------------------------------------------
+// Een H2-titel zonder kaartachtergrond. De weergave staat in app.js (headingCardEl); hier alleen de definitie.
+
+const heading = {
+  label: 'Kop',
+  icon: 'heading',
+  hint: 'Titel boven een groep cards',
+  title: 'Nieuwe kop',
+  defaults: {},
+  render: (card) => ({ el: h('h2', {}, card.title), destroy() {} }),
+  // Alleen bij het aanmaken: vraagt de titel. Hernoemen kan daarna via het menu of dubbelklikken.
+  async init(cfg) {
+    const r = await openDialog(
+      'Nieuwe kop',
+      fieldsBody([{ name: 'title', label: 'Titel', required: true, maxlength: 100, placeholder: 'Bijvoorbeeld Klanten' }], 'Een kop komt boven een groep cards. Sleep de cards die erbij horen eronder.'),
+      { submit: 'Aanmaken' },
+    );
+    return r ? { config: cfg, title: r.title } : null;
+  },
+};
+
+export const WIDGETS = { clock, weather, countdown, note, todo, search, heading };

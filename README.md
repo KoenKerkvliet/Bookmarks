@@ -7,7 +7,7 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 - Pagina's met eigen titel en instelbaar aantal kolommen (1–6); pagina's kies je in een dropdown linksboven in de header (met Nieuw erin, zoeken bij veel pagina's, en herschikken door te slepen)
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
-- Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube). Ze slepen, hernoemen en verwijderen net als andere cards
+- Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube), plus de **kop**: een H2-titel zonder kaartachtergrond waaronder je bij elkaar horende cards sleept. Ze slepen, hernoemen en verwijderen net als andere cards
 - Pagina **Video's** voor YouTube Shorts en video's: rooster met voorbeeldplaatjes, afspelen in de site (met vorige/volgende), filter op Shorts/Video's en Te kijken/Bekeken, handmatig toevoegen, en ze komen mee in het zoeken. De extensie slaat ze op met een eigen knop. Sommige video's staan embedden niet toe (keuze van de eigenaar); daarvoor is er de knop "Openen op YouTube"
 - Vaste pagina **Nieuw**: hier komen links binnen die je via de browserextensie opslaat; met één klik verplaats je ze naar de juiste pagina en card
 - Zoeken door al je links (`/` of `Ctrl+K`), realtime updates vanuit de extensie
@@ -41,7 +41,7 @@ Lokaal testen kan met een willekeurige statische server, bijvoorbeeld `python -m
 
 ### Bestaande installatie bijwerken (widgets)
 
-Heb je het schema al eerder uitgevoerd? Draai dan eenmalig [`supabase/migrations/002_widgets.sql`](supabase/migrations/002_widgets.sql) in de SQL Editor. Zonder deze stap werken je bestaande cards gewoon door, maar kun je geen widgets toevoegen. Het weer haalt gegevens op bij Open-Meteo; daarvoor wordt alleen de plaatsnaam en locatie van je widget gedeeld.
+Heb je het schema al eerder uitgevoerd? Draai dan eenmalig [`supabase/migrations/002_widgets.sql`](supabase/migrations/002_widgets.sql) in de SQL Editor, en voor de kop-kaart ook [`004_heading_cards.sql`](supabase/migrations/004_heading_cards.sql). Zonder deze stap werken je bestaande cards gewoon door, maar kun je geen widgets toevoegen. Het weer haalt gegevens op bij Open-Meteo; daarvoor wordt alleen de plaatsnaam en locatie van je widget gedeeld.
 
 ### Video's activeren
 
