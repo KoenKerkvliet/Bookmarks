@@ -1020,6 +1020,29 @@ body.dragging .column {
   text-shadow: var(--text-glow);
 }
 
+/* H3: subkop met dunne accentlijn. H4: kleine, gedempte tussenkop. */
+.heading-card.lvl-h3 .heading-head {
+  padding-top: 4px;
+  border-bottom-width: 1px;
+}
+
+.heading-card.lvl-h3 .heading-title {
+  font-size: 16px;
+}
+
+.heading-card.lvl-h4 .heading-head {
+  padding-top: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.heading-card.lvl-h4 .heading-title {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  color: var(--text-2);
+  text-transform: uppercase;
+  text-shadow: none;
+}
+
 .heading-card .icon-btn {
   opacity: 0;
 }

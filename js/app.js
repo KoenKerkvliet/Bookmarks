@@ -1,7 +1,7 @@
 import * as api from './api.js';
 import { h, icon, showMenu, showPopover, closeMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
-import { WIDGETS } from './widgets.js';
+import { WIDGETS, HEADING_LEVELS } from './widgets.js';
 import { parseYouTube, thumbUrl, embedUrl, fetchOEmbed } from './videos.js';
 
 const VIEWS = [
@@ -582,6 +582,17 @@ async function deleteCard(card) {
 }
 
 function cardMenu(card, anchor) {
+  if (card.type === 'heading') {
+    showMenu(anchor, [
+      ...HEADING_LEVELS.map((l) => ({ label: l.label, checked: headingLevel(card) === l.value, onClick: () => setHeadingLevel(card, l.value) })),
+      '-',
+      { label: 'Naam wijzigen', icon: 'pencil', onClick: () => renameCard(card) },
+      { label: 'Verplaatsen naar pagina…', icon: 'move', onClick: () => moveCard(card) },
+      '-',
+      { label: 'Kop verwijderen', icon: 'trash', danger: true, onClick: () => deleteCard(card) },
+    ]);
+    return;
+  }
   if (!isLinksCard(card)) {
     const def = WIDGETS[card.type];
     showMenu(anchor, [
@@ -905,12 +916,22 @@ function boardView(page) {
   return wrap;
 }
 
+const headingLevel = (card) => (HEADING_LEVELS.some((l) => l.value === card.config?.level) ? card.config.level : 'h2');
+
+function setHeadingLevel(card, level) {
+  if (headingLevel(card) === level) return;
+  card.config = { ...card.config, level };
+  renderMain();
+  persist(api.patchCard(card.id, { config: card.config }));
+}
+
 function headingCardEl(card) {
-  const title = h('h2', { class: 'heading-title', title: 'Dubbelklik om de naam te wijzigen' }, card.title);
+  const level = headingLevel(card);
+  const title = h(level, { class: 'heading-title', title: 'Dubbelklik om de naam te wijzigen' }, card.title);
   title.addEventListener('dblclick', () => renameCard(card));
   return h(
     'article',
-    { class: 'card heading-card', dataset: { id: card.id } },
+    { class: `card heading-card lvl-${level}`, dataset: { id: card.id } },
     h('header', { class: 'card-head heading-head' }, title, iconButton('dots', 'Kop-opties', (e) => cardMenu(card, e.currentTarget), 'small')),
   );
 }

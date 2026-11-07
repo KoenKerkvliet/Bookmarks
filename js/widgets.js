@@ -514,21 +514,34 @@ const search = {
 // ---- Kop ------------------------------------------------------------------------------------------------------
 // Een H2-titel zonder kaartachtergrond. De weergave staat in app.js (headingCardEl); hier alleen de definitie.
 
+export const HEADING_LEVELS = [
+  { value: 'h2', label: 'H2 · Kop' },
+  { value: 'h3', label: 'H3 · Subkop' },
+  { value: 'h4', label: 'H4 · Klein' },
+];
+
 const heading = {
   label: 'Kop',
   icon: 'heading',
-  hint: 'Titel boven een groep cards',
+  hint: 'H2, H3 of H4 boven een groep cards',
   title: 'Nieuwe kop',
-  defaults: {},
+  defaults: { level: 'h2' },
   render: (card) => ({ el: h('h2', {}, card.title), destroy() {} }),
-  // Alleen bij het aanmaken: vraagt de titel. Hernoemen kan daarna via het menu of dubbelklikken.
+  // Alleen bij het aanmaken: vraagt titel en niveau. Daarna wijzig je het niveau in het menu
+  // en de titel via het menu of door te dubbelklikken.
   async init(cfg) {
     const r = await openDialog(
       'Nieuwe kop',
-      fieldsBody([{ name: 'title', label: 'Titel', required: true, maxlength: 100, placeholder: 'Bijvoorbeeld Klanten' }], 'Een kop komt boven een groep cards. Sleep de cards die erbij horen eronder.'),
+      fieldsBody(
+        [
+          { name: 'title', label: 'Titel', required: true, maxlength: 100, placeholder: 'Bijvoorbeeld Klanten' },
+          { name: 'level', label: 'Niveau', type: 'segmented', value: cfg.level ?? 'h2', options: HEADING_LEVELS },
+        ],
+        'Een kop komt boven een groep cards. Sleep de cards die erbij horen eronder. Gebruik H3 en H4 voor subtitels.',
+      ),
       { submit: 'Aanmaken' },
     );
-    return r ? { config: cfg, title: r.title } : null;
+    return r ? { config: { ...cfg, level: r.level }, title: r.title } : null;
   },
 };
 
