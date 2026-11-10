@@ -8,7 +8,7 @@ Eigen startpagina met snelkoppelingen, in de geest van start.me. Pure HTML/CSS/J
 - Cards met titel en snelkoppelingen; per card de weergave: lijst, iconen S, M of L
 - Cards slepen tussen kolommen, links slepen tussen cards, alles bewerken en verwijderen (links met "ongedaan maken")
 - Widgets als card: **klok** (analoog of digitaal, per tijdzone), **weer** (Open-Meteo, 5 dagen), **aftellen**, **notitie**, **taken** (afvinklijst) en **zoeken** (Google, DuckDuckGo, Bing, Ecosia, YouTube), plus de **kop**: een H2-, H3- of H4-titel zonder kaartachtergrond waaronder je bij elkaar horende cards sleept (het niveau wissel je in het menu). Ze slepen, hernoemen en verwijderen net als andere cards
-- Pagina **Video's** voor YouTube Shorts en video's: rooster met voorbeeldplaatjes, afspelen in de site (met vorige/volgende), filter op Shorts/Video's en Te kijken/Bekeken, handmatig toevoegen, en ze komen mee in het zoeken. De extensie slaat ze op met een eigen knop. Sommige video's staan embedden niet toe (keuze van de eigenaar); daarvoor is er de knop "Openen op YouTube"
+- Pagina **Video's** voor YouTube Shorts en video's: rooster met voorbeeldplaatjes, afspelen in de site (met vorige/volgende), filters op Shorts/Video's, Te kijken/Bekeken en labels (tags) in één werkbalk naast de titel, handmatig toevoegen, en ze komen mee in het zoeken. De extensie slaat ze op met een eigen knop. Sommige video's staan embedden niet toe (keuze van de eigenaar); daarvoor is er de knop "Openen op YouTube"
 - Vaste pagina **Nieuw**: hier komen links binnen die je via de browserextensie opslaat; met één klik verplaats je ze naar de juiste pagina en card
 - Zoeken door al je links (`/` of `Ctrl+K`), realtime updates vanuit de extensie
 - Zes thema's: **Licht**, **Donker**, **Neon**, **Oceaan**, **Bos** en **Zonsondergang**, of **Automatisch** (volgt je systeem). Kies via Instellingen of het paletje rechtsboven in de header; de keuze geldt per apparaat
@@ -45,7 +45,7 @@ Heb je het schema al eerder uitgevoerd? Draai dan eenmalig [`supabase/migrations
 
 ### Video's activeren
 
-Voer eenmalig [`supabase/migrations/003_videos.sql`](supabase/migrations/003_videos.sql) uit in de SQL Editor. Zonder dit bestand werkt de rest van de site gewoon en toont de pagina Video's een melding. Titel en kanaalnaam haalt de site zelf op bij YouTube (oEmbed, geen sleutel nodig); de speler gebruikt de officiële ingesloten YouTube-speler. Er wordt geen video gedownload of opgeslagen, alleen het adres, de titel en de kanaalnaam.
+Voer eenmalig [`supabase/migrations/003_videos.sql`](supabase/migrations/003_videos.sql) uit in de SQL Editor. Zonder dit bestand werkt de rest van de site gewoon en toont de pagina Video's een melding. Voor labels op video's voer je daarna ook [`supabase/migrations/005_video_tags.sql`](supabase/migrations/005_video_tags.sql) uit; zonder die stap werken video's gewoon, maar kun je geen labels opslaan. Titel en kanaalnaam haalt de site zelf op bij YouTube (oEmbed, geen sleutel nodig); de speler gebruikt de officiële ingesloten YouTube-speler. Er wordt geen video gedownload of opgeslagen, alleen het adres, de titel en de kanaalnaam.
 
 ## Extensie koppelen
 

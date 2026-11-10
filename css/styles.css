@@ -1374,16 +1374,106 @@ body.dragging .column {
   padding: 8px 20px 40px;
 }
 
-.vfilters {
-  display: flex;
+.videos-bar {
   flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
+  gap: 10px 12px;
 }
 
 .vcount {
-  margin-left: auto;
   font-size: 13px;
+  white-space: nowrap;
+}
+
+.tag-btn.on {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+  border-color: transparent;
+}
+
+.vtags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.vtag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  color: var(--primary-strong);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  background: var(--primary-soft);
+  border: 0;
+  border-radius: 999px;
+}
+
+button.vtag:hover {
+  color: var(--on-primary);
+  background: var(--primary);
+}
+
+.vtag.on {
+  color: var(--on-primary);
+  background: var(--primary);
+}
+
+.vtag.more {
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.tag-menu {
+  min-width: 220px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+}
+
+.tag-row .icon {
+  visibility: hidden;
+}
+
+.tag-row.on .icon {
+  visibility: visible;
+  color: var(--primary-strong);
+}
+
+.tag-row.on .menu-label {
+  font-weight: 600;
+}
+
+.tag-count {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.tag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  padding: 4px 12px;
+  color: var(--text-2);
+  font-weight: 500;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.tag-chip:hover {
+  border-color: var(--primary-strong);
+}
+
+.tag-chip[aria-pressed='true'] {
+  color: var(--on-primary);
+  font-weight: 600;
+  background: var(--primary);
+  border-color: var(--primary);
 }
 
 .vsection h2 {
@@ -2215,6 +2305,45 @@ summary {
 
   .row .label {
     width: 100%;
+  }
+}
+
+@media (max-width: 560px) {
+  .videos-bar .vcount {
+    display: none;
+  }
+
+  /* Rij 1: titel, type-filter en +; rij 2: status-filter en labels */
+  .videos-bar {
+    gap: 8px;
+  }
+
+  .videos-bar .page-title {
+    order: -4;
+    flex: 0 0 auto;
+  }
+
+  .videos-bar > .segmented:first-of-type {
+    order: -3;
+  }
+
+  .videos-bar .spacer {
+    order: -2;
+  }
+
+  .videos-bar .btn.primary {
+    order: -1;
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
+  .videos-bar .seg {
+    padding: 6px 9px;
+  }
+
+  .videos-bar .btn.primary span:not(.icon) {
+    display: none;
   }
 }
 

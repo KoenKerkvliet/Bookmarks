@@ -307,3 +307,11 @@ begin
 exception when duplicate_object then
   null;
 end $$;
+
+-- ---------------------------------------------------------------------------
+-- Labels op video's: zie ook supabase/migrations/005_video_tags.sql
+-- ---------------------------------------------------------------------------
+alter table public.videos
+  add column if not exists tags text[] not null default '{}';
+
+create index if not exists videos_tags_idx on public.videos using gin (tags);

@@ -1239,15 +1239,53 @@ async function logout() {
 
 // ---- Video's ------------------------------------------------------------------------------------------------------------
 
-const videoFilter = { kind: prefs.get('videoKind', 'all'), status: prefs.get('videoStatus', 'all') };
+const videoFilter = {
+  kind: prefs.get('videoKind', 'all'),
+  status: prefs.get('videoStatus', 'all'),
+  tags: (() => {
+    try {
+      const saved = JSON.parse(prefs.get('videoTags', '[]'));
+      return Array.isArray(saved) ? saved.filter((t) => typeof t === 'string') : [];
+    } catch {
+      return [];
+    }
+  })(),
+};
 const enrichTried = new Set();
 
 const videosByNewest = () => [...(state.videos ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+const videoTags = (v) => v.tags ?? [];
+const normalizeTag = (t) => t.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30);
+
+// Alle labels met het aantal video's, meest gebruikte eerst.
+function allVideoTags() {
+  const counts = new Map();
+  for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'nl'));
+}
+
+// Geselecteerde filterlabels die nog bij minstens één video horen.
+function activeVideoTags() {
+  const existing = new Set(allVideoTags().map((t) => t.tag));
+  return videoFilter.tags.filter((t) => existing.has(t));
+}
 
 function filteredVideos() {
+  const active = activeVideoTags();
   return videosByNewest().filter(
-    (v) => (videoFilter.kind === 'all' || v.kind === videoFilter.kind) && (videoFilter.status === 'all' || (videoFilter.status === 'watched') === !!v.watched),
+    (v) =>
+      (videoFilter.kind === 'all' || v.kind === videoFilter.kind) &&
+      (videoFilter.status === 'all' || (videoFilter.status === 'watched') === !!v.watched) &&
+      active.every((t) => videoTags(v).includes(t)),
   );
+}
+
+function toggleTagFilter(tag) {
+  const set = new Set(videoFilter.tags);
+  if (!set.delete(tag)) set.add(tag);
+  videoFilter.tags = [...set];
+  prefs.set('videoTags', JSON.stringify(videoFilter.tags));
+  renderMain();
 }
 
 function videoTile(v, group) {
@@ -1267,6 +1305,14 @@ function videoTile(v, group) {
       h('span', { class: 'vtitle' }, v.title),
       v.channel ? h('span', { class: 'vchannel' }, v.channel) : null,
     ),
+    videoTags(v).length
+      ? h(
+          'div',
+          { class: 'vtags' },
+          videoTags(v).slice(0, 4).map((t) => h('button', { class: `vtag${videoFilter.tags.includes(t) ? ' on' : ''}`, type: 'button', title: `Filter op “${t}”`, onclick: () => toggleTagFilter(t) }, t)),
+          videoTags(v).length > 4 ? h('span', { class: 'vtag more', title: videoTags(v).slice(4).join(', ') }, `+${videoTags(v).length - 4}`) : null,
+        )
+      : null,
     h('button', { class: 'icon-btn vmenu', type: 'button', 'aria-label': `Opties voor ${v.title}`, onclick: (e) => videoMenu(v, e.currentTarget) }, icon('dots', 16)),
   );
   tile.addEventListener('contextmenu', (e) => {
@@ -1283,6 +1329,7 @@ function videoMenu(v, anchor) {
     { label: 'Openen op YouTube', icon: 'video', onClick: () => window.open(v.url, '_blank', 'noopener') },
     { label: v.watched ? 'Markeren als niet bekeken' : 'Markeren als bekeken', icon: 'check', onClick: () => toggleWatched(v) },
     '-',
+    { label: 'Labels…', icon: 'tag', onClick: () => editTags(v) },
     { label: 'Titel wijzigen', icon: 'pencil', onClick: () => editVideo(v) },
     { label: 'Adres kopiëren', icon: 'copy', onClick: () => copyText(v.url, 'Adres gekopieerd') },
     '-',
@@ -1391,14 +1438,151 @@ async function enrichVideos() {
   if (changed && currentRoute().name === 'videos' && !document.querySelector('dialog[open]') && !isTyping()) renderMain();
 }
 
+// Labels bewerken: bestaande labels aan/uit klikken en nieuwe typen.
+async function editTags(v) {
+  const known = allVideoTags().map((t) => t.tag);
+  const selected = new Set(videoTags(v));
+  const typed = new Set(); // nieuw getypte labels blijven als chip staan
+  const chips = h('div', { class: 'tag-chips' });
+  const error = h('div', { class: 'field-error', role: 'alert' });
+  const input = h('input', { class: 'input', type: 'text', placeholder: 'Nieuw label, bijvoorbeeld tennis', maxlength: 30, autocomplete: 'off', 'aria-label': 'Nieuw label' });
+
+  const paint = () => {
+    const all = [...new Set([...known, ...typed, ...selected])];
+    chips.replaceChildren(
+      ...(all.length
+        ? all.map((t) =>
+            h(
+              'button',
+              {
+                class: 'tag-chip',
+                type: 'button',
+                'aria-pressed': String(selected.has(t)),
+                onclick: () => {
+                  if (!selected.delete(t)) selected.add(t);
+                  paint();
+                },
+              },
+              t,
+            ),
+          )
+        : [h('span', { class: 'muted' }, 'Nog geen labels. Typ er hieronder een.')]),
+    );
+  };
+  const addTyped = () => {
+    input.value.split(',').map(normalizeTag).filter(Boolean).forEach((t) => {
+      typed.add(t);
+      selected.add(t);
+    });
+    input.value = '';
+    paint();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addTyped();
+    }
+  });
+  paint();
+
+  const result = await openDialog(
+    'Labels',
+    {
+      el: h(
+        'div',
+        { class: 'fields' },
+        h('p', { class: 'dialog-text' }, v.title),
+        chips,
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Nieuw label'), input, h('span', { class: 'field-hint' }, 'Druk op Enter om toe te voegen. Maximaal 10 labels per video.')),
+        error,
+      ),
+      focus: () => input,
+      collect() {
+        addTyped();
+        if (selected.size > 10) {
+          error.textContent = 'Een video kan maximaal 10 labels hebben.';
+          return undefined;
+        }
+        return [...selected].sort((a, b) => a.localeCompare(b, 'nl'));
+      },
+    },
+    { submit: 'Opslaan' },
+  );
+  if (!result) return;
+  const before = v.tags;
+  v.tags = result;
+  renderMain();
+  try {
+    await api.patchVideo(v.id, { tags: result });
+  } catch (err) {
+    v.tags = before;
+    renderMain();
+    const hint = /tags/i.test(err.message) ? ' (voer eerst supabase/migrations/005_video_tags.sql uit)' : '';
+    toast(`Labels opslaan mislukt: ${err.message}${hint}`, { error: true });
+  }
+}
+
+let tagMenuClosedAt = 0;
+
+// Vink-lijst van labels; blijft open zodat je er meerdere kunt kiezen.
+function openTagFilter(anchor) {
+  const rows = new Map();
+  const clear = h(
+    'button',
+    {
+      class: 'menu-item',
+      type: 'button',
+      onclick: () => {
+        videoFilter.tags = [];
+        prefs.set('videoTags', '[]');
+        closeMenu();
+        renderMain();
+      },
+    },
+    icon('x', 16),
+    h('span', { class: 'menu-label' }, 'Filter wissen'),
+  );
+  const sync = () => {
+    const on = new Set(videoFilter.tags);
+    rows.forEach((row, tag) => {
+      row.classList.toggle('on', on.has(tag));
+      row.setAttribute('aria-checked', String(on.has(tag)));
+    });
+    clear.hidden = !videoFilter.tags.length;
+  };
+  const menu = h('div', { class: 'menu tag-menu', role: 'menu', 'aria-label': 'Filter op label' });
+  for (const { tag, count } of allVideoTags()) {
+    const row = h(
+      'button',
+      {
+        class: 'menu-item tag-row',
+        type: 'button',
+        role: 'menuitemcheckbox',
+        onclick: () => {
+          toggleTagFilter(tag);
+          sync();
+        },
+      },
+      icon('check', 16),
+      h('span', { class: 'menu-label' }, tag),
+      h('span', { class: 'tag-count' }, count),
+    );
+    rows.set(tag, row);
+    menu.append(row);
+  }
+  menu.append(h('div', { class: 'menu-sep' }), clear);
+  sync();
+  showPopover(anchor, menu, { alignLeft: true, onClose: () => (tagMenuClosedAt = performance.now()) });
+  (menu.querySelector('.tag-row') ?? menu.querySelector('.menu-item'))?.focus({ preventScroll: true });
+}
+
 function videosView() {
-  const controls = state.videos
-    ? h('button', { class: 'btn primary', type: 'button', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video'))
-    : null;
-  const wrap = h('div', { class: 'view' }, topbar({ title: "Video's", controls }));
+  const wrap = h('div', { class: 'view' });
+  const title = h('h1', { class: 'page-title static' }, "Video's");
 
   if (state.videos === null) {
     wrap.append(
+      h('header', { class: 'topbar' }, title),
       h(
         'div',
         { class: 'empty' },
@@ -1411,6 +1595,7 @@ function videosView() {
   }
   if (!state.videos.length) {
     wrap.append(
+      h('header', { class: 'topbar' }, title),
       h(
         'div',
         { class: 'empty' },
@@ -1426,29 +1611,58 @@ function videosView() {
   const list = filteredVideos();
   const shorts = list.filter((v) => v.kind === 'short');
   const videos = list.filter((v) => v.kind === 'video');
-  const filters = h(
-    'div',
-    { class: 'vfilters' },
-    segmented([{ value: 'all', label: 'Alles' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
-      videoFilter.kind = value;
-      prefs.set('videoKind', value);
-      renderMain();
-    }),
-    segmented([{ value: 'all', label: 'Alle' }, { value: 'todo', label: 'Te kijken' }, { value: 'watched', label: 'Bekeken' }], videoFilter.status, (value) => {
-      videoFilter.status = value;
-      prefs.set('videoStatus', value);
-      renderMain();
-    }),
-    h('span', { class: 'muted vcount' }, `${list.length} van ${state.videos.length}`),
+  const tags = allVideoTags();
+  const active = activeVideoTags();
+
+  const tagButton = tags.length
+    ? h(
+        'button',
+        {
+          class: `btn tag-btn${active.length ? ' on' : ''}`,
+          type: 'button',
+          'aria-haspopup': 'menu',
+          onclick: (e) => {
+            if (performance.now() - tagMenuClosedAt < 200) return; // klik die het menu zojuist sloot
+            openTagFilter(e.currentTarget);
+          },
+        },
+        icon('tag', 16),
+        h('span', {}, active.length ? `Labels · ${active.length}` : 'Labels'),
+        icon('chevron-down', 14),
+      )
+    : null;
+
+  // Titel, filters en acties op één rij: dat scheelt een hele regel voor de video's zelf.
+  wrap.append(
+    h(
+      'header',
+      { class: 'topbar videos-bar' },
+      title,
+      segmented([{ value: 'all', label: 'Alles' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
+        videoFilter.kind = value;
+        prefs.set('videoKind', value);
+        renderMain();
+      }),
+      segmented([{ value: 'all', label: 'Alle' }, { value: 'todo', label: 'Te kijken' }, { value: 'watched', label: 'Bekeken' }], videoFilter.status, (value) => {
+        videoFilter.status = value;
+        prefs.set('videoStatus', value);
+        renderMain();
+      }),
+      tagButton,
+      ...active.map((t) => h('button', { class: 'vtag on removable', type: 'button', title: `Filter “${t}” verwijderen`, onclick: () => toggleTagFilter(t) }, t, icon('x', 12))),
+      h('div', { class: 'spacer' }),
+      h('span', { class: 'muted vcount' }, `${list.length} van ${state.videos.length}`),
+      h('button', { class: 'btn primary', type: 'button', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video')),
+    ),
   );
-  const body = h('div', { class: 'videos' }, filters);
-  const section = (title, group, kind) =>
+
+  const section = (heading, group, kind) =>
     group.length
-      ? h('section', { class: 'vsection' }, h('h2', {}, `${title} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group))))
+      ? h('section', { class: 'vsection' }, h('h2', {}, `${heading} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group))))
       : null;
-  body.append(section('Shorts', shorts, 'short'), section("Video's", videos, 'video'));
-  if (!list.length) body.append(h('p', { class: 'search-empty' }, 'Geen video’s met dit filter.'));
-  wrap.append(body);
+  wrap.append(
+    h('div', { class: 'videos' }, [section('Shorts', shorts, 'short'), section("Video's", videos, 'video'), list.length ? null : h('p', { class: 'search-empty' }, 'Geen video’s met deze filters.')]),
+  );
   enrichVideos();
   return wrap;
 }
@@ -1606,7 +1820,7 @@ function openSearch() {
         const tokens = input.value.toLowerCase().split(/\s+/).filter(Boolean);
         const all = [
           ...state.bookmarks.map((b) => ({ b, text: `${b.title} ${b.url}`, at: Date.parse(b.created_at) })),
-          ...(state.videos ?? []).map((video) => ({ video, text: `${video.title} ${video.channel ?? ''} youtube video`, at: Date.parse(video.created_at) })),
+          ...(state.videos ?? []).map((video) => ({ video, text: `${video.title} ${video.channel ?? ''} ${videoTags(video).join(' ')} youtube video`, at: Date.parse(video.created_at) })),
         ].sort((x, y) => y.at - x.at);
         results = tokens.length ? all.filter((r) => tokens.every((t) => r.text.toLowerCase().includes(t))) : all;
         results = results.slice(0, 40);
