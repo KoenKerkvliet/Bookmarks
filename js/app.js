@@ -2,7 +2,7 @@ import * as api from './api.js';
 import { h, icon, showMenu, showPopover, closeMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
 import { WIDGETS, HEADING_LEVELS } from './widgets.js';
-import { parseYouTube, playlistAsVideo, videoThumb, embedUrl, fetchOEmbed } from './videos.js';
+import { parseYouTube, playlistAsVideo, videoThumb, embedUrl, fetchOEmbed, cleanTitle, hasTitleNoise } from './videos.js';
 
 const VIEWS = [
   { value: 'list', label: 'Lijst' },
@@ -171,6 +171,7 @@ function persist(promise, message = 'Opslaan mislukt') {
 async function reload() {
   try {
     Object.assign(state, await api.loadAll());
+    tidyVideoTitles(state.videos);
     lastLoad = Date.now();
     renderAll();
   } catch (err) {
@@ -1551,6 +1552,18 @@ async function addVideo() {
   }
 }
 
+// Schoont titels op die de extensie letterlijk uit de tabtitel overnam, zoals "(10) Vietnam - YouTube".
+// Lokaal meteen, en op de achtergrond ook in de database, zodat het maar één keer hoeft.
+function tidyVideoTitles(videos) {
+  for (const v of videos ?? []) {
+    if (!hasTitleNoise(v.title)) continue;
+    const title = cleanTitle(v.title);
+    if (!title || title === v.title) continue;
+    v.title = title;
+    api.patchVideo(v.id, { title }).catch((err) => console.warn('Titel opschonen mislukt', err));
+  }
+}
+
 // Haalt kanaalnaam (en zo nodig titel/type) op bij YouTube voor video's die de extensie zonder die gegevens opsloeg.
 async function enrichVideos() {
   const queue = (state.videos ?? []).filter((v) => (!v.channel || (v.kind === 'playlist' && !v.thumb)) && !enrichTried.has(v.id));
@@ -2532,6 +2545,7 @@ function onRemoteBookmark(row) {
 
 function onRemoteVideo(row) {
   if (!state.videos || state.videos.some((v) => v.id === row.id)) return;
+  tidyVideoTitles([row]);
   state.videos.push(row);
   renderHeader();
   if (currentRoute().name === 'videos' && !document.querySelector('dialog[open]')) renderMain();
@@ -2545,6 +2559,7 @@ async function startApp() {
   try {
     await api.ensureSetup();
     Object.assign(state, await api.loadAll());
+    tidyVideoTitles(state.videos);
     state.email = await api.currentEmail();
   } catch (err) {
     renderFatal(err);

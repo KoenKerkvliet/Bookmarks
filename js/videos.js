@@ -56,7 +56,11 @@ export const embedUrl = (v) =>
     ? `https://www.youtube-nocookie.com/embed/videoseries?list=${encodeURIComponent(v.video_id)}&${PLAYER}`
     : `https://www.youtube-nocookie.com/embed/${v.video_id}?${PLAYER}`;
 
-export const cleanTitle = (t) => String(t ?? '').replace(/\s*[-–]\s*YouTube\s*$/i, '').trim();
+// Haalt " - YouTube" achteraan weg, en vooraan het aantal meldingen dat YouTube in de tabtitel zet,
+// zoals "(10) " of "(99+) ". Maximaal twee cijfers, zodat een titel als "(1994) Film" blijft staan.
+const NOTIFY_PREFIX = /^\s*\(\d{1,2}\+?\)\s+/;
+export const cleanTitle = (t) => String(t ?? '').replace(NOTIFY_PREFIX, '').replace(/\s*[-–]\s*YouTube\s*$/i, '').trim();
+export const hasTitleNoise = (t) => NOTIFY_PREFIX.test(t ?? '') || /\s[-–]\s*YouTube\s*$/i.test(t ?? '');
 
 // -> { title, channel, portrait, thumb } of null als YouTube geen gegevens geeft (privé, verwijderd, offline).
 // `v` is een rij uit videos (of { kind, video_id }).
