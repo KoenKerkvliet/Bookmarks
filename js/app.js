@@ -12,7 +12,7 @@ const VIEWS = [
 ];
 const MAX_COLUMNS = 6;
 
-const state = { pages: [], cards: [], bookmarks: [], videos: null, settings: null, email: '', loaded: false };
+const state = { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, settings: null, email: '', loaded: false };
 const $root = document.getElementById('app');
 
 let sortables = [];
@@ -714,12 +714,21 @@ function openPagesMenu(anchor) {
         })
       : null;
   const sep = () => h('div', { class: 'menu-sep' });
+  const onVideos = route.name === 'videos';
+  const videosItem = h(
+    'a',
+    { class: `pm-item${onVideos ? ' active' : ''}`, href: '#/videos', role: 'menuitem', 'aria-current': onVideos ? 'page' : null, onclick: closeMenu },
+    icon('video', 16),
+    h('span', { class: 'pm-label' }, "Video's"),
+    state.videos?.length ? h('span', { class: 'pm-count' }, state.videos.length) : null,
+  );
   const menu = h(
     'div',
     { class: 'pages-menu', role: 'menu', 'aria-label': "Pagina's" },
     filter,
     inbox ? pageItem(inbox, route, count ? h('span', { class: 'badge' }, count > 99 ? '99+' : count) : null) : null,
-    inbox && pages.length ? sep() : null,
+    videosItem,
+    pages.length ? sep() : null,
     list,
     pages.length ? null : h('p', { class: 'pm-empty' }, "Nog geen pagina's."),
     sep(),
@@ -773,35 +782,31 @@ function renderHeader() {
   const route = currentRoute();
   const count = inboxLinks().length;
   const onPage = route.name === 'page' && !!route.page;
+  const onVideos = route.name === 'videos';
   const inInbox = onPage && route.page.is_inbox;
+  const label = onPage ? route.page.title : onVideos ? "Video's" : "Pagina's";
 
   const pagesBtn = h(
     'button',
     {
-      class: `tab pages-btn${onPage ? ' active' : ''}`,
+      class: `tab pages-btn${onPage || onVideos ? ' active' : ''}`,
       type: 'button',
       'aria-haspopup': 'menu',
-      'aria-label': onPage ? `Pagina: ${route.page.title}. Pagina kiezen` : "Pagina kiezen",
+      'aria-label': onPage || onVideos ? `Pagina: ${label}. Pagina kiezen` : 'Pagina kiezen',
       onclick: (e) => {
         if (performance.now() - pagesMenuClosedAt < 200) return; // klik die het menu zojuist sloot
         openPagesMenu(e.currentTarget);
       },
     },
-    icon(inInbox ? 'inbox' : 'page', 16),
-    h('span', { class: 'tab-label' }, onPage ? route.page.title : "Pagina's"),
+    icon(onVideos ? 'video' : inInbox ? 'inbox' : 'page', 16),
+    h('span', { class: 'tab-label' }, label),
     count && !inInbox ? h('span', { class: 'badge', title: `${count} nieuw in Nieuw` }, count > 99 ? '99+' : count) : null,
     icon('chevron-down', 16),
-  );
-  const videosTab = h(
-    'a',
-    { class: `tab${route.name === 'videos' ? ' active' : ''}`, href: '#/videos', 'aria-current': route.name === 'videos' ? 'page' : null },
-    icon('video', 16),
-    h('span', { class: 'tab-label' }, "Video's"),
   );
 
   el.replaceChildren(
     h('a', { class: 'brand', href: '#/', title: 'Bookmarks' }, h('img', { class: 'brand-logo', src: 'icons/icon-192.png', alt: '', width: 32, height: 32, draggable: 'false' }), h('span', { class: 'brand-name' }, 'Bookmarks')),
-    h('nav', { class: 'header-nav', 'aria-label': 'Navigatie' }, pagesBtn, videosTab),
+    h('nav', { class: 'header-nav', 'aria-label': 'Navigatie' }, pagesBtn),
     h('div', { class: 'spacer' }),
     h(
       'div',
@@ -1239,59 +1244,112 @@ async function logout() {
 
 // ---- Video's ------------------------------------------------------------------------------------------------------------
 
-const videoFilter = {
-  kind: prefs.get('videoKind', 'all'),
-  status: prefs.get('videoStatus', 'all'),
-  tags: (() => {
-    try {
-      const saved = JSON.parse(prefs.get('videoTags', '[]'));
-      return Array.isArray(saved) ? saved.filter((t) => typeof t === 'string') : [];
-    } catch {
-      return [];
-    }
-  })(),
-};
+// Actief tabblad: TAB_ALL (alles), TAB_NONE (zonder label) of een labelnaam. Per apparaat onthouden.
+const TAB_ALL = '__all';
+const TAB_NONE = '__none';
+const VIDEO_MIME = 'application/x-bookmarks-video';
+const videoFilter = { kind: prefs.get('videoKind', 'all'), tab: prefs.get('videoTab', TAB_ALL) };
 const enrichTried = new Set();
 
 const videosByNewest = () => [...(state.videos ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 const videoTags = (v) => v.tags ?? [];
 const normalizeTag = (t) => t.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30);
+const sortTags = (tags) => [...new Set(tags)].sort((a, b) => a.localeCompare(b, 'nl'));
 
-// Alle labels met het aantal video's, meest gebruikte eerst.
+// Alle labels met het aantal video's, meest gebruikte eerst (voor de labeleditor).
 function allVideoTags() {
   const counts = new Map();
   for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
   return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'nl'));
 }
 
-// Geselecteerde filterlabels die nog bij minstens één video horen.
-function activeVideoTags() {
-  const existing = new Set(allVideoTags().map((t) => t.tag));
-  return videoFilter.tags.filter((t) => existing.has(t));
+// Tabbladen in de opgeslagen volgorde; labels zonder vaste plek komen alfabetisch achteraan.
+function videoTabList() {
+  const counts = new Map();
+  for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
+  const saved = [...(state.videoTabs ?? [])].sort(byPos).map((t) => t.tag);
+  const extra = [...counts.keys()].filter((t) => !saved.includes(t)).sort((a, b) => a.localeCompare(b, 'nl'));
+  return [...saved, ...extra].map((tag) => ({ tag, count: counts.get(tag) ?? 0 }));
 }
 
-function filteredVideos() {
-  const active = activeVideoTags();
-  return videosByNewest().filter(
-    (v) =>
-      (videoFilter.kind === 'all' || v.kind === videoFilter.kind) &&
-      (videoFilter.status === 'all' || (videoFilter.status === 'watched') === !!v.watched) &&
-      active.every((t) => videoTags(v).includes(t)),
-  );
+const isTagTab = (tab) => tab !== TAB_ALL && tab !== TAB_NONE;
+const untaggedCount = () => (state.videos ?? []).filter((v) => !videoTags(v).length).length;
+
+// Het actieve tabblad, met terugval op Alles als het tabblad niet meer bestaat.
+function currentVideoTab() {
+  const tab = videoFilter.tab;
+  if (tab === TAB_NONE) return untaggedCount() ? TAB_NONE : TAB_ALL;
+  if (isTagTab(tab)) return videoTabList().some((t) => t.tag === tab) ? tab : TAB_ALL;
+  return TAB_ALL;
 }
 
-function toggleTagFilter(tag) {
-  const set = new Set(videoFilter.tags);
-  if (!set.delete(tag)) set.add(tag);
-  videoFilter.tags = [...set];
-  prefs.set('videoTags', JSON.stringify(videoFilter.tags));
+function setVideoTab(tab) {
+  videoFilter.tab = tab;
+  prefs.set('videoTab', tab);
   renderMain();
 }
 
+function filteredVideos() {
+  const tab = currentVideoTab();
+  return videosByNewest().filter(
+    (v) =>
+      (videoFilter.kind === 'all' || v.kind === videoFilter.kind) &&
+      (tab === TAB_ALL || (tab === TAB_NONE ? !videoTags(v).length : videoTags(v).includes(tab))),
+  );
+}
+
+// Video op een tabblad laten vallen. Vanuit een ander label-tabblad: verplaatsen (oud label eraf).
+// Vanuit Alles of Zonder label: label erbij. Op Zonder label: alle labels eraf. Altijd met ongedaan maken.
+async function dropVideoOnTab(id, target) {
+  const v = (state.videos ?? []).find((x) => x.id === id);
+  if (!v || target === TAB_ALL) return;
+  const from = currentVideoTab();
+  const before = videoTags(v);
+  let next;
+  let message;
+  if (target === TAB_NONE) {
+    next = [];
+    message = 'Labels verwijderd';
+  } else if (isTagTab(from) && from !== target) {
+    next = sortTags([...before.filter((t) => t !== from), target]);
+    message = `Verplaatst naar “${target}”`;
+  } else {
+    next = sortTags([...before, target]);
+    message = `Label “${target}” toegevoegd`;
+  }
+  if (next.join('\n') === before.join('\n')) {
+    toast(target === TAB_NONE ? 'Deze video heeft geen labels.' : `Staat al in “${target}”.`);
+    return;
+  }
+  v.tags = next;
+  renderMain();
+  try {
+    await api.patchVideo(v.id, { tags: next });
+  } catch (err) {
+    v.tags = before;
+    renderMain();
+    const hint = /tags/i.test(err.message) ? ' (voer eerst supabase/migrations/005_video_tags.sql uit)' : '';
+    toast(`Opslaan mislukt: ${err.message}${hint}`, { error: true });
+    return;
+  }
+  toast(message, {
+    action: {
+      label: 'Ongedaan maken',
+      onClick: () => {
+        v.tags = before;
+        renderMain();
+        persist(api.patchVideo(v.id, { tags: before }));
+      },
+    },
+  });
+}
+
 function videoTile(v, group) {
+  const tab = currentVideoTab();
+  const otherTags = videoTags(v).filter((t) => t !== tab); // het label van dit tabblad hoeft niet nog eens
   const tile = h(
     'div',
-    { class: `vtile ${v.kind}${v.watched ? ' watched' : ''}`, dataset: { id: v.id } },
+    { class: `vtile ${v.kind}${v.watched ? ' watched' : ''}`, dataset: { id: v.id }, draggable: 'true' },
     h(
       'button',
       { class: 'vtile-main', type: 'button', 'aria-label': `Afspelen: ${v.title}`, onclick: () => openPlayer(group, group.indexOf(v)) },
@@ -1305,16 +1363,26 @@ function videoTile(v, group) {
       h('span', { class: 'vtitle' }, v.title),
       v.channel ? h('span', { class: 'vchannel' }, v.channel) : null,
     ),
-    videoTags(v).length
+    otherTags.length
       ? h(
           'div',
           { class: 'vtags' },
-          videoTags(v).slice(0, 4).map((t) => h('button', { class: `vtag${videoFilter.tags.includes(t) ? ' on' : ''}`, type: 'button', title: `Filter op “${t}”`, onclick: () => toggleTagFilter(t) }, t)),
-          videoTags(v).length > 4 ? h('span', { class: 'vtag more', title: videoTags(v).slice(4).join(', ') }, `+${videoTags(v).length - 4}`) : null,
+          otherTags.slice(0, 3).map((t) => h('button', { class: 'vtag', type: 'button', title: `Naar tabblad “${t}”`, onclick: () => setVideoTab(t) }, t)),
+          otherTags.length > 3 ? h('span', { class: 'vtag more', title: otherTags.slice(3).join(', ') }, `+${otherTags.length - 3}`) : null,
         )
       : null,
     h('button', { class: 'icon-btn vmenu', type: 'button', 'aria-label': `Opties voor ${v.title}`, onclick: (e) => videoMenu(v, e.currentTarget) }, icon('dots', 16)),
   );
+  // Slepen naar een tabblad (desktop). Op touchscreens gaat het via Labels… in het menu.
+  tile.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData(VIDEO_MIME, v.id);
+    e.dataTransfer.effectAllowed = 'move';
+    document.body.classList.add('dragging-video');
+  });
+  tile.addEventListener('dragend', () => {
+    document.body.classList.remove('dragging-video');
+    document.querySelectorAll('.vtab.drop-target').forEach((el) => el.classList.remove('drop-target'));
+  });
   tile.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     videoMenu(v, { x: e.clientX, y: e.clientY });
@@ -1368,7 +1436,8 @@ async function deleteVideo(v) {
       onClick: async () => {
         try {
           const { id, video_id, kind, url, title, channel, watched, created_at } = v;
-          state.videos.push(await api.insertVideo({ id, video_id, kind, url, title, channel, watched, created_at }));
+          const tags = videoTags(v).length ? { tags: videoTags(v) } : {};
+          state.videos.push(await api.insertVideo({ id, video_id, kind, url, title, channel, watched, created_at, ...tags }));
           renderMain();
         } catch (err) {
           toast(`Terugzetten mislukt: ${err.message}`, { error: true });
@@ -1400,6 +1469,7 @@ async function addVideo() {
     return;
   }
   const info = await fetchOEmbed(p.id);
+  const tab = currentVideoTab(); // in een label-tabblad krijgt de video dat label meteen
   try {
     const row = await api.insertVideo({
       video_id: p.id,
@@ -1407,6 +1477,7 @@ async function addVideo() {
       url: p.url,
       title: info?.title || 'YouTube-video',
       channel: info?.channel ?? null,
+      ...(isTagTab(tab) ? { tags: [tab] } : {}),
     });
     state.videos.push(row);
     renderAll();
@@ -1522,58 +1593,213 @@ async function editTags(v) {
   }
 }
 
-let tagMenuClosedAt = 0;
+// ---- Tabbladen (labels) ------------------------------------------------------------------------------
 
-// Vink-lijst van labels; blijft open zodat je er meerdere kunt kiezen.
-function openTagFilter(anchor) {
-  const rows = new Map();
-  const clear = h(
+function tabsUnavailable() {
+  toast('Voer eerst supabase/migrations/006_video_tabs.sql uit om tabbladen te beheren.', { error: true });
+}
+
+async function saveTabOrder(tags) {
+  state.videoTabs = tags.map((tag, position) => ({ tag, position }));
+  try {
+    await api.saveVideoTabOrder(tags);
+  } catch (err) {
+    console.error(err);
+    toast(`Volgorde opslaan mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function addVideoTab() {
+  if (state.videoTabs === null) return tabsUnavailable();
+  const existing = videoTabList().map((t) => t.tag);
+  const r = await openDialog(
+    'Nieuw tabblad',
+    fieldsBody(
+      [{ name: 'tag', label: 'Naam', required: true, maxlength: 30, placeholder: 'Bijvoorbeeld tennis', validate: (v) => (normalizeTag(v) ? null : 'Geef het tabblad een naam.') }],
+      'Elk tabblad is een label. Sleep een video op het tabblad, of geef hem het label via Labels… in het menu van de video.',
+    ),
+    { submit: 'Aanmaken' },
+  );
+  if (!r) return;
+  const tag = normalizeTag(r.tag);
+  if (!existing.includes(tag)) await saveTabOrder([...existing, tag]);
+  setVideoTab(tag);
+}
+
+async function renameVideoTab(tag) {
+  if (state.videoTabs === null) return tabsUnavailable();
+  const r = await openDialog(
+    'Tabblad hernoemen',
+    fieldsBody([{ name: 'tag', label: 'Naam', value: tag, required: true, maxlength: 30 }], 'Het label verandert ook bij alle video’s in dit tabblad. Kies je een bestaande naam, dan worden de tabbladen samengevoegd.'),
+  );
+  if (!r) return;
+  const next = normalizeTag(r.tag);
+  if (!next || next === tag) return;
+  try {
+    await api.renameVideoTag(tag, next);
+  } catch (err) {
+    toast(`Hernoemen mislukt: ${err.message}`, { error: true });
+    return;
+  }
+  for (const v of state.videos ?? []) {
+    if (videoTags(v).includes(tag)) v.tags = sortTags(videoTags(v).map((t) => (t === tag ? next : t)));
+  }
+  const merged = state.videoTabs.some((t) => t.tag === next);
+  state.videoTabs = merged ? state.videoTabs.filter((t) => t.tag !== tag) : state.videoTabs.map((t) => (t.tag === tag ? { ...t, tag: next } : t));
+  if (videoFilter.tab === tag) {
+    videoFilter.tab = next;
+    prefs.set('videoTab', next);
+  }
+  renderMain();
+  toast(merged ? `Samengevoegd met “${next}”` : `Hernoemd naar “${next}”`);
+}
+
+async function deleteVideoTab(tag) {
+  const n = (state.videos ?? []).filter((v) => videoTags(v).includes(tag)).length;
+  const ok = await confirmDialog({
+    title: 'Tabblad verwijderen?',
+    message: n
+      ? `Het tabblad “${tag}” verdwijnt. De ${n} video${n === 1 ? '' : '’s'} blijven bewaard; alleen dit label gaat eraf.`
+      : `Het lege tabblad “${tag}” verdwijnt.`,
+  });
+  if (!ok) return;
+  try {
+    await api.deleteVideoTag(tag);
+  } catch (err) {
+    const hint = /function|delete_video_tag|schema cache/i.test(err.message) ? ' (voer eerst supabase/migrations/006_video_tabs.sql uit)' : '';
+    toast(`Verwijderen mislukt: ${err.message}${hint}`, { error: true });
+    return;
+  }
+  for (const v of state.videos ?? []) if (videoTags(v).includes(tag)) v.tags = videoTags(v).filter((t) => t !== tag);
+  if (state.videoTabs) state.videoTabs = state.videoTabs.filter((t) => t.tag !== tag);
+  if (videoFilter.tab === tag) {
+    videoFilter.tab = TAB_ALL;
+    prefs.set('videoTab', TAB_ALL);
+  }
+  renderMain();
+  toast(`Tabblad “${tag}” verwijderd`);
+}
+
+function tabMenu(tag, anchor) {
+  showMenu(anchor, [
+    { label: 'Hernoemen…', icon: 'pencil', onClick: () => renameVideoTab(tag) },
+    { label: 'Tabblad verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideoTab(tag) },
+  ]);
+}
+
+function videoTabEl({ id, label, count, fixed, active }) {
+  const el = h(
     'button',
     {
-      class: 'menu-item',
+      class: `vtab${active ? ' active' : ''}${fixed ? ' fixed' : ''}`,
       type: 'button',
-      onclick: () => {
-        videoFilter.tags = [];
-        prefs.set('videoTags', '[]');
-        closeMenu();
-        renderMain();
-      },
+      role: 'tab',
+      'aria-selected': String(active),
+      dataset: { tab: id },
+      title: fixed ? null : `${label} · dubbelklik om te hernoemen, rechtsklik voor opties`,
+      onclick: () => setVideoTab(id),
     },
-    icon('x', 16),
-    h('span', { class: 'menu-label' }, 'Filter wissen'),
+    h('span', { class: 'vtab-label' }, label),
+    h('span', { class: 'vtab-count' }, count),
   );
-  const sync = () => {
-    const on = new Set(videoFilter.tags);
-    rows.forEach((row, tag) => {
-      row.classList.toggle('on', on.has(tag));
-      row.setAttribute('aria-checked', String(on.has(tag)));
+  if (!fixed) {
+    el.addEventListener('dblclick', () => renameVideoTab(id));
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      tabMenu(id, { x: e.clientX, y: e.clientY });
     });
-    clear.hidden = !videoFilter.tags.length;
-  };
-  const menu = h('div', { class: 'menu tag-menu', role: 'menu', 'aria-label': 'Filter op label' });
-  for (const { tag, count } of allVideoTags()) {
-    const row = h(
-      'button',
-      {
-        class: 'menu-item tag-row',
-        type: 'button',
-        role: 'menuitemcheckbox',
-        onclick: () => {
-          toggleTagFilter(tag);
-          sync();
-        },
-      },
-      icon('check', 16),
-      h('span', { class: 'menu-label' }, tag),
-      h('span', { class: 'tag-count' }, count),
-    );
-    rows.set(tag, row);
-    menu.append(row);
   }
-  menu.append(h('div', { class: 'menu-sep' }), clear);
-  sync();
-  showPopover(anchor, menu, { alignLeft: true, onClose: () => (tagMenuClosedAt = performance.now()) });
-  (menu.querySelector('.tag-row') ?? menu.querySelector('.menu-item'))?.focus({ preventScroll: true });
+  if (id !== TAB_ALL) {
+    el.addEventListener('dragover', (e) => {
+      if (!e.dataTransfer.types.includes(VIDEO_MIME)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+    el.addEventListener('drop', (e) => {
+      const videoId = e.dataTransfer.getData(VIDEO_MIME);
+      el.classList.remove('drop-target');
+      if (!videoId) return;
+      e.preventDefault();
+      dropVideoOnTab(videoId, id);
+    });
+  }
+  return el;
+}
+
+function videoTabsBar() {
+  const tab = currentVideoTab();
+  const tags = videoTabList();
+  const untagged = untaggedCount();
+
+  const list = h('div', { class: 'vtabs-list' }, tags.map((t) => videoTabEl({ id: t.tag, label: t.tag, count: t.count, active: tab === t.tag })));
+  const scroller = h(
+    'div',
+    { class: 'vtabs-scroll', role: 'tablist', 'aria-label': 'Tabbladen' },
+    videoTabEl({ id: TAB_ALL, label: 'Alles', count: state.videos.length, fixed: true, active: tab === TAB_ALL }),
+    untagged ? videoTabEl({ id: TAB_NONE, label: 'Zonder label', count: untagged, fixed: true, active: tab === TAB_NONE }) : null,
+    tags.length ? h('span', { class: 'vtab-sep', 'aria-hidden': 'true' }) : null,
+    list,
+  );
+  const bar = h(
+    'div',
+    { class: 'vtabs' },
+    scroller,
+    iconButton('plus', 'Nieuw tabblad', addVideoTab, 'small vtabs-btn'),
+    isTagTab(tab) ? iconButton('dots', `Opties voor tabblad ${tab}`, (e) => tabMenu(tab, e.currentTarget), 'small vtabs-btn') : null,
+  );
+
+  // Horizontaal scrollen met het muiswiel, fade aan de randen en het actieve tabblad in beeld.
+  const updateFade = () => {
+    scroller.classList.toggle('fade-end', scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2);
+    scroller.classList.toggle('fade-start', scroller.scrollLeft > 2);
+  };
+  scroller.addEventListener('scroll', updateFade, { passive: true });
+  scroller.addEventListener(
+    'wheel',
+    (e) => {
+      if (scroller.scrollWidth <= scroller.clientWidth || Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+      scroller.scrollLeft += e.deltaY;
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+  requestAnimationFrame(() => {
+    const active = scroller.querySelector('.vtab.active');
+    if (active) {
+      const a = active.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      if (a.left < s.left + 8) scroller.scrollLeft -= s.left + 40 - a.left;
+      else if (a.right > s.right - 8) scroller.scrollLeft += a.right - s.right + 40;
+    }
+    updateFade();
+  });
+
+  // Tabbladen verslepen. Muismodus (forceFallback), zodat het niet botst met video's die je op een tabblad sleept.
+  if (tags.length > 1) {
+    sortables.push(
+      Sortable.create(list, {
+        animation: 150,
+        forceFallback: true,
+        fallbackTolerance: 4,
+        delay: 200,
+        delayOnTouchOnly: true,
+        direction: 'horizontal',
+        ghostClass: 'drag-ghost',
+        onEnd: (evt) => {
+          if (evt.oldIndex === evt.newIndex) return;
+          if (state.videoTabs === null) {
+            tabsUnavailable();
+            renderMain();
+            return;
+          }
+          saveTabOrder([...list.children].map((node) => node.dataset.tab));
+        },
+      }),
+    );
+  }
+  return bar;
 }
 
 function videosView() {
@@ -1608,51 +1834,24 @@ function videosView() {
     return wrap;
   }
 
+  const tab = currentVideoTab();
   const list = filteredVideos();
   const shorts = list.filter((v) => v.kind === 'short');
   const videos = list.filter((v) => v.kind === 'video');
-  const tags = allVideoTags();
-  const active = activeVideoTags();
 
-  const tagButton = tags.length
-    ? h(
-        'button',
-        {
-          class: `btn tag-btn${active.length ? ' on' : ''}`,
-          type: 'button',
-          'aria-haspopup': 'menu',
-          onclick: (e) => {
-            if (performance.now() - tagMenuClosedAt < 200) return; // klik die het menu zojuist sloot
-            openTagFilter(e.currentTarget);
-          },
-        },
-        icon('tag', 16),
-        h('span', {}, active.length ? `Labels · ${active.length}` : 'Labels'),
-        icon('chevron-down', 14),
-      )
-    : null;
-
-  // Titel, filters en acties op één rij: dat scheelt een hele regel voor de video's zelf.
+  // Eén werkbalk: tabbladen, type-filter en toevoegen. De paginanaam staat al in de header.
   wrap.append(
     h(
       'header',
       { class: 'topbar videos-bar' },
-      title,
-      segmented([{ value: 'all', label: 'Alles' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
+      h('h1', { class: 'sr-only' }, "Video's"),
+      videoTabsBar(),
+      segmented([{ value: 'all', label: 'Beide' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
         videoFilter.kind = value;
         prefs.set('videoKind', value);
         renderMain();
       }),
-      segmented([{ value: 'all', label: 'Alle' }, { value: 'todo', label: 'Te kijken' }, { value: 'watched', label: 'Bekeken' }], videoFilter.status, (value) => {
-        videoFilter.status = value;
-        prefs.set('videoStatus', value);
-        renderMain();
-      }),
-      tagButton,
-      ...active.map((t) => h('button', { class: 'vtag on removable', type: 'button', title: `Filter “${t}” verwijderen`, onclick: () => toggleTagFilter(t) }, t, icon('x', 12))),
-      h('div', { class: 'spacer' }),
-      h('span', { class: 'muted vcount' }, `${list.length} van ${state.videos.length}`),
-      h('button', { class: 'btn primary', type: 'button', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video')),
+      h('button', { class: 'btn primary', type: 'button', title: isTagTab(tab) ? `Video toevoegen aan “${tab}”` : 'Video toevoegen', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video')),
     ),
   );
 
@@ -1660,9 +1859,15 @@ function videosView() {
     group.length
       ? h('section', { class: 'vsection' }, h('h2', {}, `${heading} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group))))
       : null;
-  wrap.append(
-    h('div', { class: 'videos' }, [section('Shorts', shorts, 'short'), section("Video's", videos, 'video'), list.length ? null : h('p', { class: 'search-empty' }, 'Geen video’s met deze filters.')]),
-  );
+  const empty = isTagTab(tab) && !videoTabList().find((t) => t.tag === tab)?.count
+    ? h(
+        'div',
+        { class: 'empty small' },
+        h('h2', {}, `Nog geen video’s in “${tab}”`),
+        h('p', {}, 'Sleep een video op dit tabblad, of kies Labels… in het menu van een video. Een video die je hier met + toevoegt, krijgt dit label vanzelf.'),
+      )
+    : h('p', { class: 'search-empty' }, 'Geen video’s met dit filter.');
+  wrap.append(h('div', { class: 'videos' }, [section('Shorts', shorts, 'short'), section("Video's", videos, 'video'), list.length ? null : empty]));
   enrichVideos();
   return wrap;
 }
@@ -2011,7 +2216,7 @@ function teardown() {
   unsubscribe = null;
   destroySortables();
   navSortable?.destroy();
-  Object.assign(state, { pages: [], cards: [], bookmarks: [], videos: null, settings: null, email: '', loaded: false });
+  Object.assign(state, { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, settings: null, email: '', loaded: false });
   renderLogin();
 }
 

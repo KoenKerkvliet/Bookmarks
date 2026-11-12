@@ -64,15 +64,17 @@ async function fetchAll(table) {
 }
 
 export async function loadAll() {
-  const [pages, cards, bookmarks, settings, videos] = await Promise.all([
+  const [pages, cards, bookmarks, settings, videos, videoTabs] = await Promise.all([
     fetchAll('pages'),
     fetchAll('cards'),
     fetchAll('bookmarks'),
     sb.from('user_settings').select('api_key').maybeSingle().then(check),
     // null = tabel bestaat nog niet (003_videos.sql niet uitgevoerd); de rest van de app werkt dan gewoon
     fetchAll('videos').catch(() => null),
+    // null = 006_video_tabs.sql nog niet uitgevoerd; tabbladen werken dan zonder vaste volgorde
+    sb.from('video_tabs').select('tag, position').order('position').then(check).catch(() => null),
   ]);
-  return { pages, cards, bookmarks, settings, videos };
+  return { pages, cards, bookmarks, settings, videos, videoTabs };
 }
 
 export async function currentEmail() {
@@ -103,6 +105,21 @@ export const removeCard = (id) => remove('cards', id);
 export const insertBookmark = (row) => insert('bookmarks', row);
 export const patchBookmark = (id, v) => patch('bookmarks', id, v);
 export const removeBookmark = (id) => remove('bookmarks', id);
+
+// Tabbladen (labels) op de Video's-pagina: volgorde opslaan, hernoemen, verwijderen
+export async function saveVideoTabOrder(tags) {
+  const { user } = await getSession();
+  const rows = tags.map((tag, position) => ({ user_id: user.id, tag, position }));
+  if (rows.length) check(await sb.from('video_tabs').upsert(rows, { onConflict: 'user_id,tag' }));
+}
+
+export async function renameVideoTag(oldTag, newTag) {
+  check(await sb.rpc('rename_video_tag', { p_old: oldTag, p_new: newTag }));
+}
+
+export async function deleteVideoTag(tag) {
+  check(await sb.rpc('delete_video_tag', { p_tag: tag }));
+}
 
 export const insertVideo = (row) => insert('videos', row);
 export const patchVideo = (id, v) => patch('videos', id, v);

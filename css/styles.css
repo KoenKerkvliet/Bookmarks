@@ -1376,18 +1376,131 @@ body.dragging .column {
 
 .videos-bar {
   flex-wrap: wrap;
+  align-items: flex-end;
   gap: 10px 12px;
 }
 
-.vcount {
-  font-size: 13px;
-  white-space: nowrap;
+/* Tabbladen: slank, met een onderstreping voor het actieve tabblad; scrollen als ze niet passen */
+.vtabs {
+  display: flex;
+  flex: 1 1 360px;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.tag-btn.on {
+.vtabs-scroll {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.vtabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.vtabs-scroll.fade-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+
+.vtabs-scroll.fade-start {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+}
+
+.vtabs-scroll.fade-start.fade-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+.vtabs-list {
+  display: flex;
+  gap: 2px;
+}
+
+.vtab {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  margin-bottom: -1px;
+  padding: 0 10px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 8px 8px 0 0;
+}
+
+.vtab:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.vtab.active {
+  color: var(--primary-strong);
+  font-weight: 600;
+  border-bottom-color: var(--primary);
+  text-shadow: var(--text-glow);
+}
+
+.vtab-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  text-align: center;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border-radius: 999px;
+  text-shadow: none;
+}
+
+.vtab.active .vtab-count {
   color: var(--primary-strong);
   background: var(--primary-soft);
-  border-color: transparent;
+}
+
+.vtab-sep {
+  flex: none;
+  align-self: center;
+  width: 1px;
+  height: 18px;
+  margin: 0 6px;
+  background: var(--border);
+}
+
+.vtabs-btn {
+  flex: none;
+  margin-bottom: 5px;
+}
+
+/* Tijdens het slepen van een video: laat zien waar hij heen kan */
+body.dragging-video .vtab:not([data-tab='__all']) {
+  outline: 1px dashed color-mix(in srgb, var(--primary) 60%, transparent);
+  outline-offset: -4px;
+}
+
+.vtab.drop-target {
+  color: var(--primary-strong);
+  background: var(--primary-soft);
+  outline: 2px solid var(--primary) !important;
 }
 
 .vtags {
@@ -1401,9 +1514,9 @@ body.dragging .column {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 2px 9px;
+  padding: 1px 8px;
   color: var(--primary-strong);
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 600;
   line-height: 1.5;
   background: var(--primary-soft);
@@ -1416,38 +1529,32 @@ button.vtag:hover {
   background: var(--primary);
 }
 
-.vtag.on {
-  color: var(--on-primary);
-  background: var(--primary);
-}
-
 .vtag.more {
   color: var(--text-2);
   background: var(--surface-2);
 }
 
-.tag-menu {
-  min-width: 220px;
-  max-height: min(60vh, 420px);
-  overflow-y: auto;
+.vtile[draggable='true'] {
+  cursor: grab;
 }
 
-.tag-row .icon {
-  visibility: hidden;
-}
-
-.tag-row.on .icon {
-  visibility: visible;
-  color: var(--primary-strong);
-}
-
-.tag-row.on .menu-label {
-  font-weight: 600;
-}
-
-.tag-count {
+.pm-count {
   font-size: 12px;
   color: var(--text-2);
+}
+
+.empty.small {
+  padding: 40px 24px;
+}
+
+/* Alleen voor schermlezers */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
 
 .tag-chips {
@@ -2309,51 +2416,31 @@ summary {
 }
 
 @media (max-width: 560px) {
-  .videos-bar .vcount {
-    display: none;
-  }
-
-  /* Rij 1: titel, type-filter en +; rij 2: status-filter en labels */
+  /* Rij 1: tabbladen over de volle breedte; rij 2: type-filter en + */
   .videos-bar {
     gap: 8px;
   }
 
-  .videos-bar .page-title {
-    order: -4;
-    flex: 0 0 auto;
+  .videos-bar .vtabs {
+    flex: 1 0 100%;
   }
 
-  .videos-bar > .segmented:first-of-type {
-    order: -3;
-  }
-
-  .videos-bar .spacer {
-    order: -2;
-  }
-
-  .videos-bar .btn.primary {
-    order: -1;
-    justify-content: center;
-    width: 40px;
-    padding: 0;
+  .videos-bar .segmented {
+    margin-right: auto;
   }
 
   .videos-bar .seg {
     padding: 6px 9px;
   }
 
+  .videos-bar .btn.primary {
+    justify-content: center;
+    width: 40px;
+    padding: 0;
+  }
+
   .videos-bar .btn.primary span:not(.icon) {
     display: none;
-  }
-}
-
-@media (max-width: 440px) {
-  .header-nav a.tab .tab-label {
-    display: none;
-  }
-
-  .header-nav a.tab {
-    padding: 0 10px;
   }
 }
 
