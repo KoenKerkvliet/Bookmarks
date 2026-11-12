@@ -2,7 +2,7 @@ import * as api from './api.js';
 import { h, icon, showMenu, showPopover, closeMenu, openDialog, fieldsBody, confirmDialog, toast } from './ui.js';
 import { parseBookmarksHtml } from './importer.js';
 import { WIDGETS, HEADING_LEVELS } from './widgets.js';
-import { parseYouTube, thumbUrl, embedUrl, fetchOEmbed } from './videos.js';
+import { parseYouTube, playlistAsVideo, videoThumb, embedUrl, fetchOEmbed } from './videos.js';
 
 const VIEWS = [
   { value: 'list', label: 'Lijst' },
@@ -12,7 +12,7 @@ const VIEWS = [
 ];
 const MAX_COLUMNS = 6;
 
-const state = { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, settings: null, email: '', loaded: false };
+const state = { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, videoGroups: null, settings: null, email: '', loaded: false };
 const $root = document.getElementById('app');
 
 let sortables = [];
@@ -1243,74 +1243,104 @@ async function logout() {
 }
 
 // ---- Video's ------------------------------------------------------------------------------------------------------------
+//
+// Twee niveaus: hoofdtabs (groepen, bijvoorbeeld Onderwijs en Persoonlijk) en daarbinnen labels.
+// Een label hoort bij één hoofdtab; labels zonder hoofdtab staan onder Overig. Video's zonder label staan
+// onder Te sorteren. Er is bewust geen tabblad met alle video's: wat je op het werk opent, blijft binnen één hoofdtab.
+// De gekozen hoofdtab en het label worden per apparaat onthouden.
 
-// Actief tabblad: TAB_ALL (alles), TAB_NONE (zonder label) of een labelnaam. Per apparaat onthouden.
-const TAB_ALL = '__all';
-const TAB_NONE = '__none';
+const OTHER = '__other'; // hoofdtab voor labels zonder hoofdtab
+const INBOX = '__none'; // video's zonder label
+const ALL_IN_GROUP = '__all'; // alle video's binnen de hoofdtab
 const VIDEO_MIME = 'application/x-bookmarks-video';
-const videoFilter = { kind: prefs.get('videoKind', 'all'), tab: prefs.get('videoTab', TAB_ALL) };
+const videoFilter = { kind: prefs.get('videoKind', 'all'), group: prefs.get('videoGroup', ''), tab: prefs.get('videoTab', ALL_IN_GROUP) };
 const enrichTried = new Set();
 
 const videosByNewest = () => [...(state.videos ?? [])].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
 const videoTags = (v) => v.tags ?? [];
 const normalizeTag = (t) => t.trim().toLowerCase().replace(/\s+/g, ' ').slice(0, 30);
 const sortTags = (tags) => [...new Set(tags)].sort((a, b) => a.localeCompare(b, 'nl'));
-
-// Alle labels met het aantal video's, meest gebruikte eerst (voor de labeleditor).
-function allVideoTags() {
-  const counts = new Map();
-  for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
-  return [...counts].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'nl'));
-}
-
-// Tabbladen in de opgeslagen volgorde; labels zonder vaste plek komen alfabetisch achteraan.
-function videoTabList() {
-  const counts = new Map();
-  for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
-  const saved = [...(state.videoTabs ?? [])].sort(byPos).map((t) => t.tag);
-  const extra = [...counts.keys()].filter((t) => !saved.includes(t)).sort((a, b) => a.localeCompare(b, 'nl'));
-  return [...saved, ...extra].map((tag) => ({ tag, count: counts.get(tag) ?? 0 }));
-}
-
-const isTagTab = (tab) => tab !== TAB_ALL && tab !== TAB_NONE;
+const groupsAvailable = () => Array.isArray(state.videoGroups);
+const sortedGroups = () => [...(state.videoGroups ?? [])].sort(byPos);
+const groupById = (id) => (state.videoGroups ?? []).find((g) => g.id === id);
+const isLabel = (tab) => !!tab && !tab.startsWith('__');
 const untaggedCount = () => (state.videos ?? []).filter((v) => !videoTags(v).length).length;
 
-// Het actieve tabblad, met terugval op Alles als het tabblad niet meer bestaat.
-function currentVideoTab() {
-  const tab = videoFilter.tab;
-  if (tab === TAB_NONE) return untaggedCount() ? TAB_NONE : TAB_ALL;
-  if (isTagTab(tab)) return videoTabList().some((t) => t.tag === tab) ? tab : TAB_ALL;
-  return TAB_ALL;
+function tagCounts() {
+  const counts = new Map();
+  for (const v of state.videos ?? []) for (const t of videoTags(v)) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return counts;
 }
 
-function setVideoTab(tab) {
-  videoFilter.tab = tab;
+// Alle labels in de opgeslagen volgorde (nieuwe labels alfabetisch achteraan), met aantal en hoofdtab.
+function videoTabList() {
+  const counts = tagCounts();
+  const rows = [...(state.videoTabs ?? [])].sort(byPos);
+  const groupOf = new Map(rows.map((r) => [r.tag, groupById(r.group_id) ? r.group_id : OTHER]));
+  const saved = rows.map((r) => r.tag);
+  const extra = [...counts.keys()].filter((t) => !groupOf.has(t)).sort((a, b) => a.localeCompare(b, 'nl'));
+  return [...saved, ...extra].map((tag) => ({ tag, count: counts.get(tag) ?? 0, group: groupOf.get(tag) ?? OTHER }));
+}
+
+const labelsIn = (groupId, list = videoTabList()) => list.filter((l) => l.group === groupId);
+const groupOfTag = (tag) => videoTabList().find((l) => l.tag === tag)?.group ?? OTHER;
+
+// Video's binnen een hoofdtab: alles met minstens één label uit die hoofdtab.
+function videosInGroup(groupId, list = videoTabList()) {
+  if (groupId === INBOX) return videosByNewest().filter((v) => !videoTags(v).length);
+  const tags = new Set(labelsIn(groupId, list).map((l) => l.tag));
+  return videosByNewest().filter((v) => videoTags(v).some((t) => tags.has(t)));
+}
+
+// De hoofdtabs op rij 1: je eigen hoofdtabs, dan Overig (alleen als er labels zonder hoofdtab zijn).
+function groupTabs() {
+  const list = videoTabList();
+  const groups = sortedGroups().map((g) => ({ id: g.id, name: g.name, real: true, count: videosInGroup(g.id, list).length }));
+  if (labelsIn(OTHER, list).length) groups.push({ id: OTHER, name: groups.length ? 'Overig' : 'Labels', real: false, count: videosInGroup(OTHER, list).length });
+  return groups;
+}
+
+// Wat er nu getoond wordt, met terugval als de gekozen hoofdtab of het label niet meer bestaat.
+function currentVideoView() {
+  const groups = groupTabs();
+  let { group, tab } = videoFilter;
+  if (!group && isLabel(tab)) group = groupOfTag(tab); // voorkeur uit de versie zonder hoofdtabs
+  if (group === INBOX && untaggedCount()) return { group: INBOX, tab: ALL_IN_GROUP };
+  if (!groups.some((g) => g.id === group)) {
+    group = groups[0]?.id ?? (untaggedCount() ? INBOX : null);
+    tab = ALL_IN_GROUP;
+  }
+  if (!group || group === INBOX) return { group, tab: ALL_IN_GROUP };
+  if (isLabel(tab) && !labelsIn(group).some((l) => l.tag === tab)) tab = ALL_IN_GROUP;
+  return { group, tab: isLabel(tab) ? tab : ALL_IN_GROUP };
+}
+
+function setVideoView(group, tab = ALL_IN_GROUP) {
+  Object.assign(videoFilter, { group, tab });
+  prefs.set('videoGroup', group);
   prefs.set('videoTab', tab);
   renderMain();
 }
 
-function filteredVideos() {
-  const tab = currentVideoTab();
-  return videosByNewest().filter(
-    (v) =>
-      (videoFilter.kind === 'all' || v.kind === videoFilter.kind) &&
-      (tab === TAB_ALL || (tab === TAB_NONE ? !videoTags(v).length : videoTags(v).includes(tab))),
-  );
+function filteredVideos(view = currentVideoView()) {
+  if (!view.group) return [];
+  const list = isLabel(view.tab) ? videosByNewest().filter((v) => videoTags(v).includes(view.tab)) : videosInGroup(view.group);
+  return list.filter((v) => videoFilter.kind === 'all' || v.kind === videoFilter.kind);
 }
 
-// Video op een tabblad laten vallen. Vanuit een ander label-tabblad: verplaatsen (oud label eraf).
-// Vanuit Alles of Zonder label: label erbij. Op Zonder label: alle labels eraf. Altijd met ongedaan maken.
+// Video op een label (of op Te sorteren) laten vallen. Vanuit een ander label: verplaatsen (oud label eraf).
+// Vanuit de hele hoofdtab: label erbij. Op Te sorteren: alle labels eraf. Altijd met ongedaan maken.
 async function dropVideoOnTab(id, target) {
   const v = (state.videos ?? []).find((x) => x.id === id);
-  if (!v || target === TAB_ALL) return;
-  const from = currentVideoTab();
+  if (!v) return;
+  const from = currentVideoView().tab;
   const before = videoTags(v);
   let next;
   let message;
-  if (target === TAB_NONE) {
+  if (target === INBOX) {
     next = [];
-    message = 'Labels verwijderd';
-  } else if (isTagTab(from) && from !== target) {
+    message = 'Labels eraf, de video staat nu bij Te sorteren';
+  } else if (isLabel(from) && from !== target && before.includes(from)) {
     next = sortTags([...before.filter((t) => t !== from), target]);
     message = `Verplaatst naar “${target}”`;
   } else {
@@ -1318,9 +1348,14 @@ async function dropVideoOnTab(id, target) {
     message = `Label “${target}” toegevoegd`;
   }
   if (next.join('\n') === before.join('\n')) {
-    toast(target === TAB_NONE ? 'Deze video heeft geen labels.' : `Staat al in “${target}”.`);
+    toast(target === INBOX ? 'Deze video heeft geen labels.' : `Staat al in “${target}”.`);
     return;
   }
+  await saveVideoTags(v, next, message);
+}
+
+async function saveVideoTags(v, next, message) {
+  const before = videoTags(v);
   v.tags = next;
   renderMain();
   try {
@@ -1332,6 +1367,7 @@ async function dropVideoOnTab(id, target) {
     toast(`Opslaan mislukt: ${err.message}${hint}`, { error: true });
     return;
   }
+  if (!message) return;
   toast(message, {
     action: {
       label: 'Ongedaan maken',
@@ -1344,21 +1380,21 @@ async function dropVideoOnTab(id, target) {
   });
 }
 
-function videoTile(v, group) {
-  const tab = currentVideoTab();
-  const otherTags = videoTags(v).filter((t) => t !== tab); // het label van dit tabblad hoeft niet nog eens
+function videoTile(v, group, view) {
+  // Alleen labels uit dezelfde hoofdtab; het label van het open tabblad hoeft niet nog eens.
+  const otherTags = videoTags(v).filter((t) => t !== view.tab && view.groupTags.has(t));
   const tile = h(
     'div',
-    { class: `vtile ${v.kind}${v.watched ? ' watched' : ''}`, dataset: { id: v.id }, draggable: 'true' },
+    { class: `vtile ${v.kind}`, dataset: { id: v.id }, draggable: 'true' },
     h(
       'button',
       { class: 'vtile-main', type: 'button', 'aria-label': `Afspelen: ${v.title}`, onclick: () => openPlayer(group, group.indexOf(v)) },
       h(
         'span',
         { class: 'vthumb' },
-        h('img', { src: thumbUrl(v.video_id), alt: '', loading: 'lazy', draggable: 'false' }),
+        videoThumb(v) ? h('img', { src: videoThumb(v), alt: '', loading: 'lazy', draggable: 'false' }) : h('span', { class: 'vthumb-empty' }, icon('playlist', 34)),
         h('span', { class: 'vplay' }, icon('play', 22)),
-        v.watched ? h('span', { class: 'vseen', title: 'Bekeken' }, icon('check', 14)) : null,
+        v.kind === 'playlist' ? h('span', { class: 'vbadge' }, icon('playlist', 14), h('span', {}, 'Playlist')) : null,
       ),
       h('span', { class: 'vtitle' }, v.title),
       v.channel ? h('span', { class: 'vchannel' }, v.channel) : null,
@@ -1367,22 +1403,19 @@ function videoTile(v, group) {
       ? h(
           'div',
           { class: 'vtags' },
-          otherTags.slice(0, 3).map((t) => h('button', { class: 'vtag', type: 'button', title: `Naar tabblad “${t}”`, onclick: () => setVideoTab(t) }, t)),
+          otherTags.slice(0, 3).map((t) => h('button', { class: 'vtag', type: 'button', title: `Naar label “${t}”`, onclick: () => setVideoView(view.group, t) }, t)),
           otherTags.length > 3 ? h('span', { class: 'vtag more', title: otherTags.slice(3).join(', ') }, `+${otherTags.length - 3}`) : null,
         )
       : null,
     h('button', { class: 'icon-btn vmenu', type: 'button', 'aria-label': `Opties voor ${v.title}`, onclick: (e) => videoMenu(v, e.currentTarget) }, icon('dots', 16)),
   );
-  // Slepen naar een tabblad (desktop). Op touchscreens gaat het via Labels… in het menu.
+  // Slepen naar een label (desktop). Op touchscreens gaat het via Labels… in het menu.
   tile.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData(VIDEO_MIME, v.id);
     e.dataTransfer.effectAllowed = 'move';
     document.body.classList.add('dragging-video');
   });
-  tile.addEventListener('dragend', () => {
-    document.body.classList.remove('dragging-video');
-    document.querySelectorAll('.vtab.drop-target').forEach((el) => el.classList.remove('drop-target'));
-  });
+  tile.addEventListener('dragend', endVideoDrag);
   tile.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     videoMenu(v, { x: e.clientX, y: e.clientY });
@@ -1390,12 +1423,19 @@ function videoTile(v, group) {
   return tile;
 }
 
+function endVideoDrag() {
+  document.body.classList.remove('dragging-video');
+  document.querySelectorAll('.drop-target').forEach((el) => el.classList.remove('drop-target'));
+}
+// Wisselt de pagina tijdens het slepen van hoofdtab, dan verdwijnt de tegel en komt er geen dragend.
+// De eerste muisbeweging na het slepen ruimt dan alsnog op.
+document.addEventListener('mousemove', () => document.body.classList.contains('dragging-video') && endVideoDrag(), { passive: true });
+
 function videoMenu(v, anchor) {
-  const group = videosByNewest().filter((x) => x.kind === v.kind);
+  const group = filteredVideos().filter((x) => x.kind === v.kind);
   showMenu(anchor, [
-    { label: 'Afspelen', icon: 'play', onClick: () => openPlayer(group, group.indexOf(v)) },
+    { label: 'Afspelen', icon: 'play', onClick: () => openPlayer(group.includes(v) ? group : [v], Math.max(group.indexOf(v), 0)) },
     { label: 'Openen op YouTube', icon: 'video', onClick: () => window.open(v.url, '_blank', 'noopener') },
-    { label: v.watched ? 'Markeren als niet bekeken' : 'Markeren als bekeken', icon: 'check', onClick: () => toggleWatched(v) },
     '-',
     { label: 'Labels…', icon: 'tag', onClick: () => editTags(v) },
     { label: 'Titel wijzigen', icon: 'pencil', onClick: () => editVideo(v) },
@@ -1403,12 +1443,6 @@ function videoMenu(v, anchor) {
     '-',
     { label: 'Verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideo(v) },
   ]);
-}
-
-function toggleWatched(v) {
-  v.watched = !v.watched;
-  persist(api.patchVideo(v.id, { watched: v.watched }));
-  if (currentRoute().name === 'videos' && !document.querySelector('dialog[open]')) renderMain();
 }
 
 async function editVideo(v) {
@@ -1435,9 +1469,9 @@ async function deleteVideo(v) {
       label: 'Ongedaan maken',
       onClick: async () => {
         try {
-          const { id, video_id, kind, url, title, channel, watched, created_at } = v;
+          const { id, video_id, kind, url, title, channel, created_at } = v;
           const tags = videoTags(v).length ? { tags: videoTags(v) } : {};
-          state.videos.push(await api.insertVideo({ id, video_id, kind, url, title, channel, watched, created_at, ...tags }));
+          state.videos.push(await api.insertVideo({ id, video_id, kind, url, title, channel, created_at, ...tags }));
           renderMain();
         } catch (err) {
           toast(`Terugzetten mislukt: ${err.message}`, { error: true });
@@ -1448,58 +1482,89 @@ async function deleteVideo(v) {
 }
 
 async function addVideo() {
-  const r = await openDialog(
-    'Video toevoegen',
-    fieldsBody([
-      {
-        name: 'url',
-        label: 'YouTube-adres',
-        required: true,
-        placeholder: 'https://www.youtube.com/shorts/…',
-        inputmode: 'url',
-        validate: (v) => (parseYouTube(v) ? null : 'Dit is geen YouTube-video of Short.'),
+  const view = currentVideoView();
+  const labels = view.group && view.group !== INBOX ? labelsIn(view.group) : [];
+  const fields = [
+    {
+      name: 'url',
+      label: 'YouTube-adres',
+      required: true,
+      placeholder: 'https://www.youtube.com/shorts/…',
+      inputmode: 'url',
+      hint: 'Een video, Short of hele playlist (youtube.com/playlist?list=…).',
+      validate: (v) => {
+        const p = parseYouTube(v);
+        if (!p) return 'Dit is geen YouTube-video, Short of playlist.';
+        if (p.kind === 'playlist' && !p.embeddable) return 'Deze playlist is privé of automatisch (zoals Later bekijken of een mix) en kan niet in de site afspelen.';
+        return null;
       },
-    ]),
-    { submit: 'Toevoegen' },
-  );
+    },
+  ];
+  if (labels.length) {
+    fields.push({
+      name: 'tag',
+      label: 'Label',
+      type: 'select',
+      value: isLabel(view.tab) ? view.tab : labels[0].tag,
+      options: [...labels.map((l) => ({ value: l.tag, label: l.tag })), { value: '', label: 'Geen label (Te sorteren)' }],
+    });
+  }
+  const r = await openDialog('Video toevoegen', fieldsBody(fields), { submit: 'Toevoegen' });
   if (!r) return;
-  const p = parseYouTube(r.url);
+  let p = parseYouTube(r.url);
+  // Een video die je in een playlist bekeek: vraag of je de video of de hele playlist wilt.
+  if (p.list) {
+    const pick = await openDialog(
+      'Video of playlist?',
+      fieldsBody(
+        [{ name: 'what', label: 'Opslaan', type: 'segmented', value: 'video', options: [{ value: 'video', label: 'Alleen deze video' }, { value: 'playlist', label: 'Hele playlist' }] }],
+        'Dit adres hoort bij een video in een playlist.',
+      ),
+      { submit: 'Opslaan' },
+    );
+    if (!pick) return;
+    if (pick.what === 'playlist') p = playlistAsVideo(p.list);
+  }
+  const isList = p.kind === 'playlist';
+  const what = isList ? 'Playlist' : 'Video';
   if (state.videos.some((v) => v.video_id === p.id)) {
-    toast('Deze video staat er al in.');
+    toast(isList ? 'Deze playlist staat er al in.' : 'Deze video staat er al in.');
     return;
   }
-  const info = await fetchOEmbed(p.id);
-  const tab = currentVideoTab(); // in een label-tabblad krijgt de video dat label meteen
+  const info = await fetchOEmbed({ kind: p.kind, video_id: p.id });
   try {
     const row = await api.insertVideo({
       video_id: p.id,
-      kind: info?.portrait ? 'short' : p.kind,
+      kind: !isList && info?.portrait ? 'short' : p.kind,
       url: p.url,
-      title: info?.title || 'YouTube-video',
+      title: info?.title || (isList ? 'YouTube-playlist' : 'YouTube-video'),
       channel: info?.channel ?? null,
-      ...(isTagTab(tab) ? { tags: [tab] } : {}),
+      ...(isList && info?.thumb ? { thumb: info.thumb } : {}),
+      ...(r.tag ? { tags: [r.tag] } : {}),
     });
     state.videos.push(row);
     renderAll();
-    toast('Video toegevoegd');
+    toast(r.tag ? `${what} toegevoegd aan “${r.tag}”` : `${what} toegevoegd aan Te sorteren`);
   } catch (err) {
-    toast(`Toevoegen mislukt: ${err.message}`, { error: true });
+    const hint = isList && /kind|check|thumb/i.test(err.message) ? ' (voer eerst supabase/migrations/008_video_playlists.sql uit)' : '';
+    toast(`Toevoegen mislukt: ${err.message}${hint}`, { error: true });
   }
 }
 
 // Haalt kanaalnaam (en zo nodig titel/type) op bij YouTube voor video's die de extensie zonder die gegevens opsloeg.
 async function enrichVideos() {
-  const queue = (state.videos ?? []).filter((v) => !v.channel && !enrichTried.has(v.id));
+  const queue = (state.videos ?? []).filter((v) => (!v.channel || (v.kind === 'playlist' && !v.thumb)) && !enrichTried.has(v.id));
   if (!queue.length) return;
   queue.forEach((v) => enrichTried.add(v.id));
   let changed = false;
   const worker = async () => {
     for (let v = queue.shift(); v; v = queue.shift()) {
-      const info = await fetchOEmbed(v.video_id);
+      const info = await fetchOEmbed(v);
       if (!info) continue;
       const patch = { channel: info.channel };
-      if (info.title && (!v.title || v.title === 'YouTube-video')) patch.title = info.title;
+      if (info.title && (!v.title || v.title === 'YouTube-video' || v.title === 'YouTube-playlist')) patch.title = info.title;
       if (info.portrait && v.kind === 'video') patch.kind = 'short';
+      if (v.kind === 'playlist' && info.thumb) patch.thumb = info.thumb;
       Object.assign(v, patch);
       changed = true;
       api.patchVideo(v.id, patch).catch(() => {});
@@ -1509,35 +1574,59 @@ async function enrichVideos() {
   if (changed && currentRoute().name === 'videos' && !document.querySelector('dialog[open]') && !isTyping()) renderMain();
 }
 
-// Labels bewerken: bestaande labels aan/uit klikken en nieuwe typen.
+// Labels bewerken: bestaande labels (per hoofdtab) aan/uit klikken en nieuwe typen.
+// Een nieuw getypt label komt in de hoofdtab die open staat.
 async function editTags(v) {
-  const known = allVideoTags().map((t) => t.tag);
+  const view = currentVideoView();
+  const homeGroup = groupById(view.group) ? view.group : null;
+  const list = videoTabList();
   const selected = new Set(videoTags(v));
   const typed = new Set(); // nieuw getypte labels blijven als chip staan
-  const chips = h('div', { class: 'tag-chips' });
+  const chips = h('div', { class: 'tag-groups' });
   const error = h('div', { class: 'field-error', role: 'alert' });
   const input = h('input', { class: 'input', type: 'text', placeholder: 'Nieuw label, bijvoorbeeld tennis', maxlength: 30, autocomplete: 'off', 'aria-label': 'Nieuw label' });
 
+  const chip = (t) =>
+    h(
+      'button',
+      {
+        class: 'tag-chip',
+        type: 'button',
+        'aria-pressed': String(selected.has(t)),
+        onclick: () => {
+          if (!selected.delete(t)) selected.add(t);
+          paint();
+        },
+      },
+      t,
+    );
   const paint = () => {
-    const all = [...new Set([...known, ...typed, ...selected])];
+    const known = new Set(list.map((l) => l.tag));
+    const fresh = [...new Set([...typed, ...selected])].filter((t) => !known.has(t));
+    const sections = groupTabs()
+      .map((g) => ({ id: g.id, name: g.name, tags: labelsIn(g.id, list).map((l) => l.tag).concat(g.id === (homeGroup ?? OTHER) ? fresh : []) }))
+      .filter((s) => s.tags.length);
+    if (!sections.some((s) => s.tags.some((t) => fresh.includes(t))) && fresh.length) sections.push({ id: '', name: 'Nieuw', tags: fresh });
+    const section = (s, named) => h('div', { class: 'tag-group' }, named ? h('div', { class: 'tag-group-name' }, s.name) : null, h('div', { class: 'tag-chips' }, s.tags.map(chip)));
+    // Binnen een hoofdtab staan de labels van andere hoofdtabs dichtgeklapt (handig op een gedeeld scherm).
+    const home = sections.filter((s) => s.id === view.group || s.id === '');
+    const rest = sections.filter((s) => !home.includes(s));
+    const fold = view.group !== INBOX && rest.length && (home.length || groupById(view.group));
+    const picked = rest.reduce((n, s) => n + s.tags.filter((t) => selected.has(t)).length, 0);
     chips.replaceChildren(
-      ...(all.length
-        ? all.map((t) =>
-            h(
-              'button',
-              {
-                class: 'tag-chip',
-                type: 'button',
-                'aria-pressed': String(selected.has(t)),
-                onclick: () => {
-                  if (!selected.delete(t)) selected.add(t);
-                  paint();
-                },
-              },
-              t,
-            ),
-          )
-        : [h('span', { class: 'muted' }, 'Nog geen labels. Typ er hieronder een.')]),
+      ...(!sections.length
+        ? [h('span', { class: 'muted' }, 'Nog geen labels. Typ er hieronder een.')]
+        : fold
+          ? [
+              ...(home.length ? home.map((s) => section(s, false)) : [h('span', { class: 'muted' }, 'Nog geen labels in deze hoofdtab. Typ er hieronder een.')]),
+              h(
+                'details',
+                { class: 'tag-more', open: chips.querySelector('details')?.open || null },
+                h('summary', {}, `Labels uit andere hoofdtabs${picked ? ` (${picked} gekozen)` : ''}`),
+                ...rest.map((s) => section(s, true)),
+              ),
+            ]
+          : sections.map((s) => section(s, sections.length > 1))),
     );
   };
   const addTyped = () => {
@@ -1556,6 +1645,7 @@ async function editTags(v) {
   });
   paint();
 
+  const hint = homeGroup ? `Een nieuw label komt onder “${groupById(homeGroup).name}”. ` : '';
   const result = await openDialog(
     'Labels',
     {
@@ -1564,7 +1654,7 @@ async function editTags(v) {
         { class: 'fields' },
         h('p', { class: 'dialog-text' }, v.title),
         chips,
-        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Nieuw label'), input, h('span', { class: 'field-hint' }, 'Druk op Enter om toe te voegen. Maximaal 10 labels per video.')),
+        h('label', { class: 'field' }, h('span', { class: 'field-label' }, 'Nieuw label'), input, h('span', { class: 'field-hint' }, `${hint}Druk op Enter om toe te voegen. Maximaal 10 labels per video.`)),
         error,
       ),
       focus: () => input,
@@ -1580,57 +1670,106 @@ async function editTags(v) {
     { submit: 'Opslaan' },
   );
   if (!result) return;
-  const before = v.tags;
-  v.tags = result;
-  renderMain();
-  try {
-    await api.patchVideo(v.id, { tags: result });
-  } catch (err) {
-    v.tags = before;
-    renderMain();
-    const hint = /tags/i.test(err.message) ? ' (voer eerst supabase/migrations/005_video_tags.sql uit)' : '';
-    toast(`Labels opslaan mislukt: ${err.message}${hint}`, { error: true });
+  const fresh = result.filter((t) => !list.some((l) => l.tag === t));
+  if (fresh.length && homeGroup && state.videoTabs) {
+    await saveTabs([...list.map((l) => ({ tag: l.tag, group: l.group })), ...fresh.map((tag) => ({ tag, group: homeGroup }))]);
   }
+  await saveVideoTags(v, result);
 }
 
-// ---- Tabbladen (labels) ------------------------------------------------------------------------------
+// ---- Labels en hoofdtabs beheren -------------------------------------------------------------------------------------
 
 function tabsUnavailable() {
-  toast('Voer eerst supabase/migrations/006_video_tabs.sql uit om tabbladen te beheren.', { error: true });
+  toast('Voer eerst supabase/migrations/006_video_tabs.sql uit om labels te beheren.', { error: true });
 }
 
-async function saveTabOrder(tags) {
-  state.videoTabs = tags.map((tag, position) => ({ tag, position }));
+function groupsUnavailable() {
+  toast('Voer eerst supabase/migrations/007_video_groups.sql uit om hoofdtabs te maken.', { error: true });
+}
+
+// Slaat alle labels op in deze volgorde, met hun hoofdtab. entries: [{ tag, group }]
+async function saveTabs(entries) {
+  const rows = entries.map((e, position) => ({ tag: e.tag, position, ...(groupsAvailable() ? { group_id: groupById(e.group) ? e.group : null } : {}) }));
+  state.videoTabs = rows.map((r) => ({ group_id: null, ...r }));
   try {
-    await api.saveVideoTabOrder(tags);
+    await api.saveVideoTabs(rows);
   } catch (err) {
     console.error(err);
-    toast(`Volgorde opslaan mislukt: ${err.message}`, { error: true });
+    toast(`Opslaan mislukt: ${err.message}`, { error: true });
   }
+}
+
+const tabEntries = (list = videoTabList()) => list.map((l) => ({ tag: l.tag, group: l.group }));
+
+// Nieuwe volgorde binnen één hoofdtab; de labels van andere hoofdtabs houden hun plek.
+function saveLabelOrder(groupId, ordered) {
+  const queue = [...ordered];
+  saveTabs(tabEntries().map((e) => (e.group === groupId ? { tag: queue.shift(), group: groupId } : e)));
+}
+
+async function moveTagToGroup(tag, groupId) {
+  if (state.videoTabs === null) return tabsUnavailable();
+  if (groupOfTag(tag) === groupId) return;
+  const entries = tabEntries().filter((e) => e.tag !== tag);
+  // achteraan in de nieuwe hoofdtab
+  const lastIndex = entries.map((e) => e.group).lastIndexOf(groupId);
+  entries.splice(lastIndex + 1 || entries.length, 0, { tag, group: groupId });
+  await saveTabs(entries);
+  renderMain();
+  const name = groupById(groupId)?.name ?? 'Overig';
+  toast(`“${tag}” staat nu onder ${name}`, { action: { label: 'Bekijken', onClick: () => setVideoView(groupId, tag) } });
+}
+
+async function moveTagDialog(tag) {
+  if (!groupsAvailable()) return groupsUnavailable();
+  const groups = sortedGroups();
+  if (!groups.length) {
+    toast('Maak eerst een hoofdtab met de + naast de hoofdtabs.');
+    return;
+  }
+  const current = groupOfTag(tag);
+  const r = await openDialog(
+    `“${tag}” verplaatsen`,
+    fieldsBody([
+      {
+        name: 'group',
+        label: 'Naar hoofdtab',
+        type: 'select',
+        value: current,
+        options: [...groups.map((g) => ({ value: g.id, label: g.name })), { value: OTHER, label: 'Overig (geen hoofdtab)' }],
+      },
+    ]),
+    { submit: 'Verplaatsen' },
+  );
+  if (r) await moveTagToGroup(tag, r.group);
 }
 
 async function addVideoTab() {
   if (state.videoTabs === null) return tabsUnavailable();
-  const existing = videoTabList().map((t) => t.tag);
+  const view = currentVideoView();
+  const groupId = groupById(view.group) ? view.group : OTHER;
+  const groupName = groupById(groupId)?.name;
   const r = await openDialog(
-    'Nieuw tabblad',
+    'Nieuw label',
     fieldsBody(
-      [{ name: 'tag', label: 'Naam', required: true, maxlength: 30, placeholder: 'Bijvoorbeeld tennis', validate: (v) => (normalizeTag(v) ? null : 'Geef het tabblad een naam.') }],
-      'Elk tabblad is een label. Sleep een video op het tabblad, of geef hem het label via Labels… in het menu van de video.',
+      [{ name: 'tag', label: 'Naam', required: true, maxlength: 30, placeholder: 'Bijvoorbeeld rekenen', validate: (v) => (normalizeTag(v) ? null : 'Geef het label een naam.') }],
+      `${groupName ? `Het label komt onder “${groupName}”. ` : ''}Sleep daarna een video op het label, of geef hem het label via Labels… in het menu van de video.`,
     ),
     { submit: 'Aanmaken' },
   );
   if (!r) return;
   const tag = normalizeTag(r.tag);
-  if (!existing.includes(tag)) await saveTabOrder([...existing, tag]);
-  setVideoTab(tag);
+  const existing = videoTabList().find((l) => l.tag === tag);
+  if (!existing) await saveTabs([...tabEntries(), { tag, group: groupId }]);
+  else if (existing.group !== groupId) await moveTagToGroup(tag, groupId);
+  setVideoView(groupId, tag);
 }
 
 async function renameVideoTab(tag) {
   if (state.videoTabs === null) return tabsUnavailable();
   const r = await openDialog(
-    'Tabblad hernoemen',
-    fieldsBody([{ name: 'tag', label: 'Naam', value: tag, required: true, maxlength: 30 }], 'Het label verandert ook bij alle video’s in dit tabblad. Kies je een bestaande naam, dan worden de tabbladen samengevoegd.'),
+    'Label hernoemen',
+    fieldsBody([{ name: 'tag', label: 'Naam', value: tag, required: true, maxlength: 30 }], 'Het label verandert ook bij alle video’s met dit label. Kies je een bestaande naam, dan worden de labels samengevoegd.'),
   );
   if (!r) return;
   const next = normalizeTag(r.tag);
@@ -1646,21 +1785,16 @@ async function renameVideoTab(tag) {
   }
   const merged = state.videoTabs.some((t) => t.tag === next);
   state.videoTabs = merged ? state.videoTabs.filter((t) => t.tag !== tag) : state.videoTabs.map((t) => (t.tag === tag ? { ...t, tag: next } : t));
-  if (videoFilter.tab === tag) {
-    videoFilter.tab = next;
-    prefs.set('videoTab', next);
-  }
-  renderMain();
+  if (videoFilter.tab === tag) setVideoView(groupOfTag(next), next);
+  else renderMain();
   toast(merged ? `Samengevoegd met “${next}”` : `Hernoemd naar “${next}”`);
 }
 
 async function deleteVideoTab(tag) {
   const n = (state.videos ?? []).filter((v) => videoTags(v).includes(tag)).length;
   const ok = await confirmDialog({
-    title: 'Tabblad verwijderen?',
-    message: n
-      ? `Het tabblad “${tag}” verdwijnt. De ${n} video${n === 1 ? '' : '’s'} blijven bewaard; alleen dit label gaat eraf.`
-      : `Het lege tabblad “${tag}” verdwijnt.`,
+    title: 'Label verwijderen?',
+    message: n ? `Het label “${tag}” verdwijnt. De ${n} video${n === 1 ? '' : '’s'} blijven bewaard; alleen dit label gaat eraf.` : `Het lege label “${tag}” verdwijnt.`,
   });
   if (!ok) return;
   try {
@@ -1672,85 +1806,195 @@ async function deleteVideoTab(tag) {
   }
   for (const v of state.videos ?? []) if (videoTags(v).includes(tag)) v.tags = videoTags(v).filter((t) => t !== tag);
   if (state.videoTabs) state.videoTabs = state.videoTabs.filter((t) => t.tag !== tag);
-  if (videoFilter.tab === tag) {
-    videoFilter.tab = TAB_ALL;
-    prefs.set('videoTab', TAB_ALL);
-  }
   renderMain();
-  toast(`Tabblad “${tag}” verwijderd`);
+  toast(`Label “${tag}” verwijderd`);
 }
 
 function tabMenu(tag, anchor) {
   showMenu(anchor, [
     { label: 'Hernoemen…', icon: 'pencil', onClick: () => renameVideoTab(tag) },
-    { label: 'Tabblad verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideoTab(tag) },
+    { label: 'Verplaatsen naar hoofdtab…', icon: 'move', onClick: () => moveTagDialog(tag) },
+    '-',
+    { label: 'Label verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideoTab(tag) },
   ]);
 }
 
-function videoTabEl({ id, label, count, fixed, active }) {
+async function addVideoGroup() {
+  if (!groupsAvailable()) return groupsUnavailable();
+  const first = !sortedGroups().length;
+  const r = await openDialog(
+    'Nieuwe hoofdtab',
+    fieldsBody(
+      [{ name: 'name', label: 'Naam', required: true, maxlength: 40, placeholder: 'Bijvoorbeeld Onderwijs' }],
+      first
+        ? 'Een hoofdtab bundelt labels, zoals Onderwijs, Webdesign of Persoonlijk. Je bestaande labels staan daarna onder Overig; sleep ze naar een hoofdtab of kies Verplaatsen in het menu van een label.'
+        : 'Sleep daarna labels naar deze hoofdtab, of maak er hier nieuwe aan.',
+    ),
+    { submit: 'Aanmaken' },
+  );
+  if (!r) return;
+  const name = r.name.trim().slice(0, 40);
+  try {
+    const row = await api.insertVideoGroup({ name, position: sortedGroups().length });
+    state.videoGroups.push(row);
+    setVideoView(row.id);
+  } catch (err) {
+    toast(`Aanmaken mislukt: ${err.message}`, { error: true });
+  }
+}
+
+async function renameVideoGroup(g) {
+  const r = await openDialog('Hoofdtab hernoemen', fieldsBody([{ name: 'name', label: 'Naam', value: g.name, required: true, maxlength: 40 }]));
+  if (!r || r.name.trim() === g.name) return;
+  g.name = r.name.trim().slice(0, 40);
+  renderMain();
+  persist(api.patchVideoGroup(g.id, { name: g.name }));
+}
+
+async function deleteVideoGroup(g) {
+  const n = labelsIn(g.id).length;
+  const ok = await confirmDialog({
+    title: 'Hoofdtab verwijderen?',
+    message: n
+      ? n === 1
+        ? `De hoofdtab “${g.name}” verdwijnt. Het label en alle video’s blijven bewaard; het label komt onder Overig.`
+        : `De hoofdtab “${g.name}” verdwijnt. De ${n} labels en alle video’s blijven bewaard; de labels komen onder Overig.`
+      : `De lege hoofdtab “${g.name}” verdwijnt.`,
+  });
+  if (!ok) return;
+  try {
+    await api.removeVideoGroup(g.id); // in de database worden de labels dan vanzelf losgekoppeld
+  } catch (err) {
+    toast(`Verwijderen mislukt: ${err.message}`, { error: true });
+    return;
+  }
+  state.videoGroups = state.videoGroups.filter((x) => x !== g);
+  state.videoTabs = (state.videoTabs ?? []).map((t) => (t.group_id === g.id ? { ...t, group_id: null } : t));
+  renderMain();
+  toast(`Hoofdtab “${g.name}” verwijderd`);
+}
+
+function saveGroupOrder(ids) {
+  const groups = ids.map(groupById).filter(Boolean);
+  groups.forEach((g, i) => (g.position = i));
+  persist(api.patchMany('video_groups', groups.map((g) => ({ id: g.id, position: g.position }))), 'Volgorde opslaan mislukt');
+}
+
+function groupMenu(g, anchor) {
+  showMenu(anchor, [
+    { label: 'Hernoemen…', icon: 'pencil', onClick: () => renameVideoGroup(g) },
+    { label: 'Hoofdtab verwijderen', icon: 'trash', danger: true, onClick: () => deleteVideoGroup(g) },
+  ]);
+}
+
+// Laat een element een video ontvangen (labels en Te sorteren).
+function acceptVideoDrop(el, target) {
+  el.classList.add('vdrop');
+  el.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes(VIDEO_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    el.classList.add('drop-target');
+  });
+  el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+  el.addEventListener('drop', (e) => {
+    const videoId = e.dataTransfer.getData(VIDEO_MIME);
+    endVideoDrag();
+    if (!videoId) return;
+    e.preventDefault();
+    dropVideoOnTab(videoId, target);
+  });
+}
+
+// Hoofdtab op rij 1. Een video die je erboven houdt, opent na een halve seconde die hoofdtab,
+// zodat je hem daarna op een label kunt laten vallen.
+function groupTabEl(g, view) {
+  const active = view.group === g.id;
+  const real = groupById(g.id);
   const el = h(
     'button',
     {
-      class: `vtab${active ? ' active' : ''}${fixed ? ' fixed' : ''}`,
+      class: `vtab vgroup${active ? ' active' : ''}`,
       type: 'button',
       role: 'tab',
       'aria-selected': String(active),
-      dataset: { tab: id },
-      title: fixed ? null : `${label} · dubbelklik om te hernoemen, rechtsklik voor opties`,
-      onclick: () => setVideoTab(id),
+      dataset: { group: g.id },
+      title: real ? `${g.name} · dubbelklik om te hernoemen, rechtsklik voor opties` : 'Labels zonder hoofdtab',
+      onclick: () => setVideoView(g.id),
     },
-    h('span', { class: 'vtab-label' }, label),
-    h('span', { class: 'vtab-count' }, count),
+    h('span', { class: 'vtab-label' }, g.name),
+    h('span', { class: 'vtab-count' }, g.count),
   );
-  if (!fixed) {
-    el.addEventListener('dblclick', () => renameVideoTab(id));
+  if (real) {
+    el.addEventListener('dblclick', () => renameVideoGroup(real));
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      tabMenu(id, { x: e.clientX, y: e.clientY });
+      groupMenu(real, { x: e.clientX, y: e.clientY });
     });
   }
-  if (id !== TAB_ALL) {
-    el.addEventListener('dragover', (e) => {
-      if (!e.dataTransfer.types.includes(VIDEO_MIME)) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      el.classList.add('drop-target');
-    });
-    el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
-    el.addEventListener('drop', (e) => {
-      const videoId = e.dataTransfer.getData(VIDEO_MIME);
-      el.classList.remove('drop-target');
-      if (!videoId) return;
-      e.preventDefault();
-      dropVideoOnTab(videoId, id);
-    });
-  }
+  let timer = 0;
+  el.addEventListener('dragenter', (e) => {
+    if (active || !e.dataTransfer.types.includes(VIDEO_MIME)) return;
+    clearTimeout(timer);
+    el.classList.add('drop-target');
+    timer = setTimeout(() => setVideoView(g.id), 550);
+  });
+  el.addEventListener('dragleave', (e) => {
+    if (el.contains(e.relatedTarget)) return;
+    clearTimeout(timer);
+    el.classList.remove('drop-target');
+  });
   return el;
 }
 
-function videoTabsBar() {
-  const tab = currentVideoTab();
-  const tags = videoTabList();
-  const untagged = untaggedCount();
-
-  const list = h('div', { class: 'vtabs-list' }, tags.map((t) => videoTabEl({ id: t.tag, label: t.tag, count: t.count, active: tab === t.tag })));
-  const scroller = h(
-    'div',
-    { class: 'vtabs-scroll', role: 'tablist', 'aria-label': 'Tabbladen' },
-    videoTabEl({ id: TAB_ALL, label: 'Alles', count: state.videos.length, fixed: true, active: tab === TAB_ALL }),
-    untagged ? videoTabEl({ id: TAB_NONE, label: 'Zonder label', count: untagged, fixed: true, active: tab === TAB_NONE }) : null,
-    tags.length ? h('span', { class: 'vtab-sep', 'aria-hidden': 'true' }) : null,
-    list,
+function inboxTabEl(view, count) {
+  const active = view.group === INBOX;
+  const el = h(
+    'button',
+    {
+      class: `vtab vinbox${active ? ' active' : ''}`,
+      type: 'button',
+      role: 'tab',
+      'aria-selected': String(active),
+      dataset: { group: INBOX },
+      title: 'Video’s zonder label, bijvoorbeeld net opgeslagen met de extensie',
+      onclick: () => setVideoView(INBOX),
+    },
+    icon('inbox', 15),
+    h('span', { class: 'vtab-label' }, 'Te sorteren'),
+    h('span', { class: 'vtab-count' }, count),
   );
-  const bar = h(
-    'div',
-    { class: 'vtabs' },
-    scroller,
-    iconButton('plus', 'Nieuw tabblad', addVideoTab, 'small vtabs-btn'),
-    isTagTab(tab) ? iconButton('dots', `Opties voor tabblad ${tab}`, (e) => tabMenu(tab, e.currentTarget), 'small vtabs-btn') : null,
-  );
+  acceptVideoDrop(el, INBOX);
+  return el;
+}
 
-  // Horizontaal scrollen met het muiswiel, fade aan de randen en het actieve tabblad in beeld.
+function labelPillEl(l, view) {
+  const active = view.tab === l.tag;
+  const el = h(
+    'button',
+    {
+      class: `vpill${active ? ' active' : ''}`,
+      type: 'button',
+      role: 'tab',
+      'aria-selected': String(active),
+      dataset: { tag: l.tag },
+      title: `${l.tag} · dubbelklik om te hernoemen, rechtsklik voor opties`,
+      onclick: () => setVideoView(view.group, l.tag),
+    },
+    h('span', { class: 'vtab-label' }, l.tag),
+    h('span', { class: 'vtab-count' }, l.count),
+  );
+  el.addEventListener('dblclick', () => renameVideoTab(l.tag));
+  el.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    tabMenu(l.tag, { x: e.clientX, y: e.clientY });
+  });
+  acceptVideoDrop(el, l.tag);
+  return el;
+}
+
+// Horizontaal scrollen met het muiswiel, fade aan de randen en het actieve item in beeld.
+function scrollStrip(scroller) {
   const updateFade = () => {
     scroller.classList.toggle('fade-end', scroller.scrollLeft + scroller.clientWidth < scroller.scrollWidth - 2);
     scroller.classList.toggle('fade-start', scroller.scrollLeft > 2);
@@ -1766,7 +2010,7 @@ function videoTabsBar() {
     { passive: false },
   );
   requestAnimationFrame(() => {
-    const active = scroller.querySelector('.vtab.active');
+    const active = scroller.querySelector('.active');
     if (active) {
       const a = active.getBoundingClientRect();
       const s = scroller.getBoundingClientRect();
@@ -1775,9 +2019,28 @@ function videoTabsBar() {
     }
     updateFade();
   });
+  return scroller;
+}
 
-  // Tabbladen verslepen. Muismodus (forceFallback), zodat het niet botst met video's die je op een tabblad sleept.
-  if (tags.length > 1) {
+// Rij 1: hoofdtabs. Herschikken door te slepen (muismodus, zodat het niet botst met video's slepen).
+function videoGroupBar(view) {
+  const groups = groupTabs();
+  const untagged = untaggedCount();
+  const real = groups.filter((g) => g.real);
+  const other = groups.find((g) => !g.real);
+  const list = h('div', { class: 'vtabs-list' }, real.map((g) => groupTabEl(g, view)));
+  const scroller = scrollStrip(
+    h(
+      'div',
+      { class: 'vtabs-scroll', role: 'tablist', 'aria-label': 'Hoofdtabs' },
+      list,
+      other ? groupTabEl(other, view) : null,
+      untagged && groups.length ? h('span', { class: 'vtab-sep', 'aria-hidden': 'true' }) : null,
+      untagged ? inboxTabEl(view, untagged) : null,
+    ),
+  );
+  const activeGroup = groupById(view.group);
+  if (real.length > 1) {
     sortables.push(
       Sortable.create(list, {
         animation: 150,
@@ -1788,18 +2051,92 @@ function videoTabsBar() {
         direction: 'horizontal',
         ghostClass: 'drag-ghost',
         onEnd: (evt) => {
-          if (evt.oldIndex === evt.newIndex) return;
+          if (evt.oldIndex !== evt.newIndex) saveGroupOrder([...list.children].map((node) => node.dataset.group));
+        },
+      }),
+    );
+  }
+  return h(
+    'div',
+    { class: 'vtabs vgroups' },
+    scroller,
+    iconButton('plus', 'Nieuwe hoofdtab', addVideoGroup, 'small vtabs-btn'),
+    activeGroup ? iconButton('dots', `Opties voor hoofdtab ${activeGroup.name}`, (e) => groupMenu(activeGroup, e.currentTarget), 'small vtabs-btn') : null,
+  );
+}
+
+// Rij 2: labels binnen de hoofdtab. Herschikken door te slepen; een label op een hoofdtab
+// laten vallen verplaatst het naar die hoofdtab.
+function videoLabelBar(view) {
+  if (view.group === INBOX) {
+    return h('p', { class: 'vpills-hint' }, 'Net opgeslagen video’s zonder label. Sleep ze op een label, of kies Labels… in het menu van een video.');
+  }
+  const labels = labelsIn(view.group);
+  const list = h('div', { class: 'vpills-list' }, labels.map((l) => labelPillEl(l, view)));
+  const all = h(
+    'button',
+    { class: `vpill all${view.tab === ALL_IN_GROUP ? ' active' : ''}`, type: 'button', role: 'tab', 'aria-selected': String(view.tab === ALL_IN_GROUP), onclick: () => setVideoView(view.group) },
+    h('span', { class: 'vtab-label' }, 'Alles'),
+  );
+  const scroller = scrollStrip(h('div', { class: 'vpills-scroll', role: 'tablist', 'aria-label': 'Labels' }, all, list));
+
+  if (labels.length) {
+    let hover = null;
+    const groupUnder = (x, y) => document.elementFromPoint(x, y)?.closest('.vgroup');
+    const point = (e) => e?.changedTouches?.[0] ?? e?.touches?.[0] ?? e;
+    const track = (e) => {
+      const p = point(e);
+      const g = p && groupUnder(p.clientX, p.clientY);
+      if (g === hover) return;
+      hover?.classList.remove('drop-target');
+      hover = g && g.dataset.group !== view.group ? g : null;
+      hover?.classList.add('drop-target');
+    };
+    sortables.push(
+      Sortable.create(list, {
+        animation: 150,
+        forceFallback: true,
+        fallbackTolerance: 4,
+        delay: 200,
+        delayOnTouchOnly: true,
+        direction: 'horizontal',
+        ghostClass: 'drag-ghost',
+        onStart: () => {
+          document.body.classList.add('dragging-label');
+          document.addEventListener('pointermove', track);
+          document.addEventListener('touchmove', track, { passive: true });
+        },
+        onEnd: (evt) => {
+          document.body.classList.remove('dragging-label');
+          document.removeEventListener('pointermove', track);
+          document.removeEventListener('touchmove', track);
+          const target = hover?.dataset.group;
+          hover?.classList.remove('drop-target');
+          hover = null;
+          const tag = evt.item.dataset.tag;
+          if (!target && evt.oldIndex === evt.newIndex) return;
           if (state.videoTabs === null) {
             tabsUnavailable();
             renderMain();
             return;
           }
-          saveTabOrder([...list.children].map((node) => node.dataset.tab));
+          if (target) {
+            moveTagToGroup(tag, target);
+            return;
+          }
+          saveLabelOrder(view.group, [...list.children].map((node) => node.dataset.tag));
         },
       }),
     );
   }
-  return bar;
+
+  return h(
+    'div',
+    { class: 'vpills' },
+    scroller,
+    h('button', { class: 'vpill add', type: 'button', title: 'Nieuw label in deze hoofdtab', onclick: addVideoTab }, icon('plus', 14), h('span', {}, 'Label')),
+    isLabel(view.tab) ? iconButton('dots', `Opties voor label ${view.tab}`, (e) => tabMenu(view.tab, e.currentTarget), 'small') : null,
+  );
 }
 
 function videosView() {
@@ -1819,7 +2156,8 @@ function videosView() {
     );
     return wrap;
   }
-  if (!state.videos.length) {
+  const view = currentVideoView();
+  if (!view.group) {
     wrap.append(
       h('header', { class: 'topbar' }, title),
       h(
@@ -1834,40 +2172,61 @@ function videosView() {
     return wrap;
   }
 
-  const tab = currentVideoTab();
-  const list = filteredVideos();
+  view.groupTags = new Set(labelsIn(view.group).map((l) => l.tag));
+  const list = filteredVideos(view);
   const shorts = list.filter((v) => v.kind === 'short');
   const videos = list.filter((v) => v.kind === 'video');
+  const playlists = list.filter((v) => v.kind === 'playlist');
+  // Het filter Playlists verschijnt pas als je er een hebt opgeslagen.
+  const hasPlaylists = state.videos.some((v) => v.kind === 'playlist');
+  const kindOptions = [
+    { value: 'all', label: hasPlaylists ? 'Alle' : 'Beide' },
+    { value: 'short', label: 'Shorts' },
+    { value: 'video', label: "Video's" },
+    ...(hasPlaylists ? [{ value: 'playlist', label: 'Playlists' }] : []),
+  ];
 
-  // Eén werkbalk: tabbladen, type-filter en toevoegen. De paginanaam staat al in de header.
+  // Rij 1: hoofdtabs. Rij 2: labels, type-filter en toevoegen. De paginanaam staat al in de header.
   wrap.append(
     h(
       'header',
       { class: 'topbar videos-bar' },
       h('h1', { class: 'sr-only' }, "Video's"),
-      videoTabsBar(),
-      segmented([{ value: 'all', label: 'Beide' }, { value: 'short', label: 'Shorts' }, { value: 'video', label: "Video's" }], videoFilter.kind, (value) => {
+      videoGroupBar(view),
+      videoLabelBar(view),
+      segmented(kindOptions, kindOptions.some((o) => o.value === videoFilter.kind) ? videoFilter.kind : 'all', (value) => {
         videoFilter.kind = value;
         prefs.set('videoKind', value);
         renderMain();
       }),
-      h('button', { class: 'btn primary', type: 'button', title: isTagTab(tab) ? `Video toevoegen aan “${tab}”` : 'Video toevoegen', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video')),
+      h('button', { class: 'btn primary', type: 'button', title: 'Video toevoegen', onclick: addVideo }, icon('plus', 16), h('span', {}, 'Video')),
     ),
   );
 
   const section = (heading, group, kind) =>
     group.length
-      ? h('section', { class: 'vsection' }, h('h2', {}, `${heading} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group))))
+      ? h('section', { class: 'vsection' }, h('h2', {}, `${heading} · ${group.length}`), h('div', { class: `vgrid ${kind}` }, group.map((v) => videoTile(v, group, view))))
       : null;
-  const empty = isTagTab(tab) && !videoTabList().find((t) => t.tag === tab)?.count
-    ? h(
-        'div',
-        { class: 'empty small' },
-        h('h2', {}, `Nog geen video’s in “${tab}”`),
-        h('p', {}, 'Sleep een video op dit tabblad, of kies Labels… in het menu van een video. Een video die je hier met + toevoegt, krijgt dit label vanzelf.'),
-      )
-    : h('p', { class: 'search-empty' }, 'Geen video’s met dit filter.');
-  wrap.append(h('div', { class: 'videos' }, [section('Shorts', shorts, 'short'), section("Video's", videos, 'video'), list.length ? null : empty]));
+  let empty = null;
+  if (!list.length) {
+    const groupName = groupById(view.group)?.name;
+    empty = isLabel(view.tab)
+      ? h(
+          'div',
+          { class: 'empty small' },
+          h('h2', {}, `Nog geen video’s met “${view.tab}”`),
+          h('p', {}, 'Sleep een video op dit label, of kies Labels… in het menu van een video. Een video die je met + toevoegt, kun je meteen dit label geven.'),
+        )
+      : groupName && !labelsIn(view.group).length
+        ? h(
+            'div',
+            { class: 'empty small' },
+            h('h2', {}, `“${groupName}” is nog leeg`),
+            h('p', {}, 'Maak een label met + Label, of sleep een bestaand label vanuit een andere hoofdtab op deze hoofdtab.'),
+          )
+        : h('p', { class: 'search-empty' }, 'Geen video’s met dit filter.');
+  }
+  wrap.append(h('div', { class: 'videos' }, [section('Playlists', playlists, 'video'), section('Shorts', shorts, 'short'), section("Video's", videos, 'video'), empty]));
   enrichVideos();
   return wrap;
 }
@@ -1879,19 +2238,13 @@ function openPlayer(group, startIndex) {
   const frame = h('div', { class: 'player-frame' });
   const titleEl = h('div', { class: 'player-title' });
   const metaEl = h('div', { class: 'player-meta' });
-  const seenBtn = h('button', { class: 'btn', type: 'button' });
   const ytLink = h('a', { class: 'btn ghost', target: '_blank', rel: 'noopener noreferrer', title: 'Openen op YouTube', 'aria-label': 'Openen op YouTube' }, icon('video', 16), h('span', {}, 'YouTube'));
 
   const paintInfo = () => {
     const v = group[i];
     dlg.dataset.kind = v.kind;
     titleEl.textContent = v.title;
-    metaEl.textContent = [v.channel, `${i + 1} van ${group.length}`].filter(Boolean).join(' · ');
-    seenBtn.replaceChildren(icon('check', 16), h('span', {}, v.watched ? 'Bekeken' : 'Markeer als bekeken'));
-    seenBtn.classList.toggle('on', !!v.watched);
-    const label = v.watched ? 'Bekeken (klik om te wissen)' : 'Markeer als bekeken';
-    seenBtn.title = label;
-    seenBtn.setAttribute('aria-label', label);
+    metaEl.textContent = [v.kind === 'playlist' ? 'Playlist' : null, v.channel, group.length > 1 ? `${i + 1} van ${group.length}` : null].filter(Boolean).join(' · ');
     ytLink.href = v.url;
   };
   const show = (n) => {
@@ -1899,7 +2252,7 @@ function openPlayer(group, startIndex) {
     const v = group[i];
     frame.replaceChildren(
       h('iframe', {
-        src: embedUrl(v.video_id),
+        src: embedUrl(v),
         title: v.title,
         allow: 'autoplay; encrypted-media; picture-in-picture; fullscreen; web-share',
         allowfullscreen: true,
@@ -1908,13 +2261,6 @@ function openPlayer(group, startIndex) {
     );
     paintInfo();
   };
-  seenBtn.addEventListener('click', () => {
-    const v = group[i];
-    v.watched = !v.watched;
-    persist(api.patchVideo(v.id, { watched: v.watched }));
-    paintInfo();
-  });
-
   // Eerst de iframe weghalen: de video stopt dan meteen, ook als het sluit-event pas later komt.
   const stop = () => frame.replaceChildren();
   const closePlayer = () => {
@@ -1940,7 +2286,6 @@ function openPlayer(group, startIndex) {
         multiple ? iconButton('chevron-left', 'Vorige', () => show(i - 1)) : null,
         multiple ? iconButton('chevron-right', 'Volgende', () => show(i + 1)) : null,
         h('div', { class: 'spacer' }),
-        seenBtn,
         ytLink,
       ),
     ),
@@ -2006,8 +2351,13 @@ function openSearch() {
                           playFromSearch(r.video);
                         },
                       },
-                      h('img', { class: 'hit-thumb', src: thumbUrl(r.video.video_id), alt: '', loading: 'lazy' }),
-                      h('span', { class: 'hit-text' }, h('span', { class: 'hit-title' }, r.video.title), h('span', { class: 'hit-meta' }, `Video’s · ${r.video.channel ?? 'YouTube'}`)),
+                      videoThumb(r.video) ? h('img', { class: 'hit-thumb', src: videoThumb(r.video), alt: '', loading: 'lazy' }) : h('span', { class: 'hit-thumb' }),
+                      h(
+                        'span',
+                        { class: 'hit-text' },
+                        h('span', { class: 'hit-title' }, r.video.title),
+                        h('span', { class: 'hit-meta' }, `${r.video.kind === 'playlist' ? 'Playlist' : 'Video’s'} · ${r.video.channel ?? 'YouTube'}`),
+                      ),
                     )
                   : h(
                       'a',
@@ -2025,7 +2375,7 @@ function openSearch() {
         const tokens = input.value.toLowerCase().split(/\s+/).filter(Boolean);
         const all = [
           ...state.bookmarks.map((b) => ({ b, text: `${b.title} ${b.url}`, at: Date.parse(b.created_at) })),
-          ...(state.videos ?? []).map((video) => ({ video, text: `${video.title} ${video.channel ?? ''} ${videoTags(video).join(' ')} youtube video`, at: Date.parse(video.created_at) })),
+          ...(state.videos ?? []).map((video) => ({ video, text: `${video.title} ${video.channel ?? ''} ${videoTags(video).join(' ')} youtube ${video.kind === 'playlist' ? 'playlist' : 'video'}`, at: Date.parse(video.created_at) })),
         ].sort((x, y) => y.at - x.at);
         results = tokens.length ? all.filter((r) => tokens.every((t) => r.text.toLowerCase().includes(t))) : all;
         results = results.slice(0, 40);
@@ -2185,7 +2535,7 @@ function onRemoteVideo(row) {
   state.videos.push(row);
   renderHeader();
   if (currentRoute().name === 'videos' && !document.querySelector('dialog[open]')) renderMain();
-  toast(`Nieuwe video: ${row.title}`);
+  toast(`${row.kind === 'playlist' ? 'Nieuwe playlist' : 'Nieuwe video'}: ${row.title}`);
 }
 
 // ---- Start ------------------------------------------------------------------------------------------------------------------------------
@@ -2216,7 +2566,7 @@ function teardown() {
   unsubscribe = null;
   destroySortables();
   navSortable?.destroy();
-  Object.assign(state, { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, settings: null, email: '', loaded: false });
+  Object.assign(state, { pages: [], cards: [], bookmarks: [], videos: null, videoTabs: null, videoGroups: null, settings: null, email: '', loaded: false });
   renderLogin();
 }
 

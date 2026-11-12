@@ -64,17 +64,22 @@ async function fetchAll(table) {
 }
 
 export async function loadAll() {
-  const [pages, cards, bookmarks, settings, videos, videoTabs] = await Promise.all([
+  const tabs = (cols) => sb.from('video_tabs').select(cols).order('position').then(check);
+  const [pages, cards, bookmarks, settings, videos, videoTabs, videoGroups] = await Promise.all([
     fetchAll('pages'),
     fetchAll('cards'),
     fetchAll('bookmarks'),
     sb.from('user_settings').select('api_key').maybeSingle().then(check),
     // null = tabel bestaat nog niet (003_videos.sql niet uitgevoerd); de rest van de app werkt dan gewoon
     fetchAll('videos').catch(() => null),
-    // null = 006_video_tabs.sql nog niet uitgevoerd; tabbladen werken dan zonder vaste volgorde
-    sb.from('video_tabs').select('tag, position').order('position').then(check).catch(() => null),
+    // null = 006_video_tabs.sql nog niet uitgevoerd; zonder 007 is er nog geen kolom group_id
+    tabs('tag, position, group_id')
+      .catch(() => tabs('tag, position'))
+      .catch(() => null),
+    // null = 007_video_groups.sql nog niet uitgevoerd; dan zijn er geen hoofdtabs
+    sb.from('video_groups').select('id, name, position').order('position').then(check).catch(() => null),
   ]);
-  return { pages, cards, bookmarks, settings, videos, videoTabs };
+  return { pages, cards, bookmarks, settings, videos, videoTabs, videoGroups };
 }
 
 export async function currentEmail() {
@@ -106,12 +111,17 @@ export const insertBookmark = (row) => insert('bookmarks', row);
 export const patchBookmark = (id, v) => patch('bookmarks', id, v);
 export const removeBookmark = (id) => remove('bookmarks', id);
 
-// Tabbladen (labels) op de Video's-pagina: volgorde opslaan, hernoemen, verwijderen
-export async function saveVideoTabOrder(tags) {
+// Labels op de Video's-pagina: volgorde en hoofdtab opslaan, hernoemen, verwijderen
+// rows: [{ tag, position, group_id? }] (group_id alleen als 007 is uitgevoerd)
+export async function saveVideoTabs(rows) {
   const { user } = await getSession();
-  const rows = tags.map((tag, position) => ({ user_id: user.id, tag, position }));
-  if (rows.length) check(await sb.from('video_tabs').upsert(rows, { onConflict: 'user_id,tag' }));
+  if (rows.length) check(await sb.from('video_tabs').upsert(rows.map((r) => ({ user_id: user.id, ...r })), { onConflict: 'user_id,tag' }));
 }
+
+// Hoofdtabs (groepen van labels)
+export const insertVideoGroup = (row) => insert('video_groups', row);
+export const patchVideoGroup = (id, v) => patch('video_groups', id, v);
+export const removeVideoGroup = (id) => remove('video_groups', id);
 
 export async function renameVideoTag(oldTag, newTag) {
   check(await sb.rpc('rename_video_tag', { p_old: oldTag, p_new: newTag }));

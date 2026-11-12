@@ -1491,16 +1491,151 @@ body.dragging .column {
   margin-bottom: 5px;
 }
 
-/* Tijdens het slepen van een video: laat zien waar hij heen kan */
-body.dragging-video .vtab:not([data-tab='__all']) {
+/* Rij 1: hoofdtabs over de volle breedte */
+.videos-bar .vgroups {
+  flex: 1 0 100%;
+}
+
+.vgroup,
+.vinbox {
+  font-size: 15px;
+}
+
+.vinbox .icon {
+  opacity: 0.8;
+}
+
+/* Rij 2: labels binnen de hoofdtab, als pillen */
+.vpills {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.vpills-scroll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.vpills-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.vpills-scroll.fade-end {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+}
+
+.vpills-scroll.fade-start {
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to left, #000 calc(100% - 32px), transparent);
+}
+
+.vpills-scroll.fade-start.fade-end {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 32px, #000 calc(100% - 32px), transparent);
+}
+
+.vpills-list {
+  display: flex;
+  gap: 6px;
+}
+
+.vpill {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.vpill:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.vpill.active {
+  color: var(--on-primary);
+  font-weight: 600;
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.vpill.active .vtab-count {
+  color: var(--on-primary);
+  background: rgb(255 255 255 / 0.3);
+}
+
+.vpill.add {
+  gap: 4px;
+  padding: 0 10px 0 8px;
+  border-style: dashed;
+}
+
+.vpills-hint {
+  flex: 1 1 320px;
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* Tijdens het slepen van een video of label: laat zien waar het heen kan */
+body.dragging-video .vdrop,
+body.dragging-label .vgroup:not(.active) {
   outline: 1px dashed color-mix(in srgb, var(--primary) 60%, transparent);
   outline-offset: -4px;
 }
 
-.vtab.drop-target {
+.vtab.drop-target,
+.vpill.drop-target {
   color: var(--primary-strong);
   background: var(--primary-soft);
   outline: 2px solid var(--primary) !important;
+}
+
+/* Labels in het labelvenster, per hoofdtab */
+.tag-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tag-more summary {
+  font-size: 13px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.tag-more[open] summary {
+  margin-bottom: 10px;
+}
+
+.tag-more .tag-group + .tag-group {
+  margin-top: 10px;
+}
+
+.tag-group-name {
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .vtags {
@@ -1637,6 +1772,49 @@ button.vtag:hover {
   aspect-ratio: 9 / 16;
 }
 
+/* Playlist: een stapeltje kaarten achter het plaatje en een label rechtsonder */
+.vtile.playlist .vtile-main {
+  padding-top: 8px;
+}
+
+/* Twee schaduwen met negatieve spreiding vormen de kaarten erachter (4px zichtbaar per kaart) */
+.vtile.playlist .vthumb {
+  --stack: 0 -12px 0 -8px color-mix(in srgb, var(--primary) 55%, var(--surface-2)),
+    0 -24px 0 -16px color-mix(in srgb, var(--primary) 28%, var(--surface-2));
+  box-shadow: var(--stack);
+}
+
+.vtile.playlist .vtile-main:hover .vthumb,
+.vtile.playlist .vtile-main:focus-visible .vthumb {
+  box-shadow: var(--stack), var(--glow);
+}
+
+.vtile.playlist .vmenu {
+  top: 14px;
+}
+
+.vthumb-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-2);
+}
+
+.vbadge {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgb(0 0 0 / 0.72);
+  border-radius: 6px;
+}
+
 .vtile-main:hover .vthumb,
 .vtile-main:focus-visible .vthumb {
   border-color: var(--card-hover, var(--primary));
@@ -1691,27 +1869,6 @@ button.vtag:hover {
   white-space: nowrap;
 }
 
-.vtile.watched .vthumb img {
-  opacity: 0.4;
-}
-
-.vtile.watched .vtitle {
-  color: var(--text-2);
-}
-
-.vseen {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  color: var(--on-primary);
-  background: var(--primary);
-  border-radius: 50%;
-}
-
 .vtile .vmenu {
   position: absolute;
   top: 6px;
@@ -1739,13 +1896,14 @@ button.vtag:hover {
   }
 }
 
-.player-dialog {
+/* .dialog.… zodat de standaardbreedte van dialogen (verderop) hier niet overheen gaat */
+.dialog.player-dialog {
   width: min(920px, calc(100vw - 24px));
   max-height: calc(100dvh - 24px);
   overflow: hidden;
 }
 
-.player-dialog[data-kind='short'] {
+.dialog.player-dialog[data-kind='short'] {
   width: min(440px, calc(100vw - 24px));
 }
 
@@ -1780,6 +1938,8 @@ button.vtag:hover {
 
 .player-frame {
   position: relative;
+  width: min(100%, calc((100dvh - 200px) * 16 / 9)); /* past ook op een laag scherm */
+  margin-inline: auto;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: #000;
@@ -1829,6 +1989,10 @@ button.vtag:hover {
   height: 30px;
   object-fit: cover;
   border-radius: 5px;
+}
+
+span.hit-thumb {
+  background: var(--surface-2);
 }
 
 /* ---- Inbox ------------------------------------------------------------------------- */
@@ -2416,12 +2580,14 @@ summary {
 }
 
 @media (max-width: 560px) {
-  /* Rij 1: tabbladen over de volle breedte; rij 2: type-filter en + */
+  /* Rij 1: hoofdtabs; rij 2: labels; rij 3: type-filter en + */
   .videos-bar {
     gap: 8px;
   }
 
-  .videos-bar .vtabs {
+  .videos-bar .vtabs,
+  .videos-bar .vpills,
+  .videos-bar .vpills-hint {
     flex: 1 0 100%;
   }
 
